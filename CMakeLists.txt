@@ -293,6 +293,7 @@ src/addons/input_macro.cpp
 src/addons/snes_input.cpp
 src/addons/tilt.cpp
 src/addons/spi_analog_ads1256.cpp
+src/addons/hml_analog.cpp
 src/addons/gamepad_usb_host.cpp
 src/addons/gamepad_usb_host_listener.cpp
 src/addons/tg16_input.cpp
@@ -329,6 +330,7 @@ CRC32
 FlashPROM
 ADS1219
 ADS1256
+ADS8332
 NeoPico
 OneBitDisplay
 ArduinoJson

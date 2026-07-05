@@ -77,6 +77,13 @@ const Navigation = () => {
 						<NavDropdown.Item
 							as={NavLink}
 							eventKey={eventKey++}
+							to="/hml-analog"
+						>
+							HML スティック設定
+						</NavDropdown.Item>
+						<NavDropdown.Item
+							as={NavLink}
+							eventKey={eventKey++}
 							to="/boot-mode-mapping"
 						>
 							{t('Navigation:boot-mode-mapping-label')}

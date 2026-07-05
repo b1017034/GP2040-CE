@@ -2505,6 +2505,114 @@ std::string getMemoryReport()
 
 static bool _abortGetHeldPins = false;
 
+
+// ---- HML Analog (ADS8332 sticks + RC filter) ----
+#include "addons/hml_analog.h"
+
+static void hmlStickToJson(JsonObject o, const HMLStickOptions& s)
+{
+    o["calMinX"] = s.calMinX; o["calCenterX"] = s.calCenterX; o["calMaxX"] = s.calMaxX;
+    o["calMinY"] = s.calMinY; o["calCenterY"] = s.calCenterY; o["calMaxY"] = s.calMaxY;
+    o["innerDeadzone"] = s.innerDeadzone;
+    o["outerDeadzone"] = s.outerDeadzone;
+    o["curvePreset"] = s.curvePreset;
+    o["curvePointCount"] = s.curvePointCount;
+    JsonArray cx = o.createNestedArray("curveX");
+    JsonArray cy = o.createNestedArray("curveY");
+    for (unsigned i = 0; i < s.curveX_count; i++) cx.add(s.curveX[i]);
+    for (unsigned i = 0; i < s.curveY_count; i++) cy.add(s.curveY[i]);
+    o["rcFilterStrength"] = s.rcFilterStrength;
+    o["rcSnapback"] = s.rcSnapback;
+    o["rcAdvanced"] = s.rcAdvanced;
+    o["rcCurvePointCount"] = s.rcCurvePointCount;
+    JsonArray rx = o.createNestedArray("rcCurveX");
+    JsonArray ry = o.createNestedArray("rcCurveY");
+    for (unsigned i = 0; i < s.rcCurveX_count; i++) rx.add(s.rcCurveX[i]);
+    for (unsigned i = 0; i < s.rcCurveY_count; i++) ry.add(s.rcCurveY[i]);
+    o["rcVelocityMult100"] = s.rcVelocityMult100;
+    o["invertX"] = s.invertX;
+    o["invertY"] = s.invertY;
+}
+
+static void hmlStickFromJson(JsonVariant o, HMLStickOptions& s)
+{
+    s.calMinX = o["calMinX"]; s.calCenterX = o["calCenterX"]; s.calMaxX = o["calMaxX"];
+    s.calMinY = o["calMinY"]; s.calCenterY = o["calCenterY"]; s.calMaxY = o["calMaxY"];
+    s.innerDeadzone = o["innerDeadzone"];
+    s.outerDeadzone = o["outerDeadzone"];
+    s.curvePreset = o["curvePreset"];
+    s.curvePointCount = o["curvePointCount"];
+    JsonArray cx = o["curveX"], cy = o["curveY"];
+    s.curveX_count = 0; s.curveY_count = 0;
+    for (unsigned i = 0; i < cx.size() && i < 5; i++) { s.curveX[i] = cx[i]; s.curveX_count++; }
+    for (unsigned i = 0; i < cy.size() && i < 5; i++) { s.curveY[i] = cy[i]; s.curveY_count++; }
+    s.rcFilterStrength = o["rcFilterStrength"];
+    s.rcSnapback = o["rcSnapback"];
+    s.rcAdvanced = o["rcAdvanced"];
+    s.rcCurvePointCount = o["rcCurvePointCount"];
+    JsonArray rx = o["rcCurveX"], ry = o["rcCurveY"];
+    s.rcCurveX_count = 0; s.rcCurveY_count = 0;
+    for (unsigned i = 0; i < rx.size() && i < 5; i++) { s.rcCurveX[i] = rx[i]; s.rcCurveX_count++; }
+    for (unsigned i = 0; i < ry.size() && i < 5; i++) { s.rcCurveY[i] = ry[i]; s.rcCurveY_count++; }
+    s.rcVelocityMult100 = o["rcVelocityMult100"];
+    s.invertX = o["invertX"];
+    s.invertY = o["invertY"];
+}
+
+std::string getHMLAnalogOptions()
+{
+    DynamicJsonDocument doc(JSON_OBJECT_SIZE(200));
+    HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    doc["enabled"] = opts.enabled;
+    doc["chLX"] = opts.chLX; doc["chLY"] = opts.chLY;
+    doc["chRX"] = opts.chRX; doc["chRY"] = opts.chRY;
+    doc["chPsButton"] = opts.chPsButton;
+    doc["psThreshold"] = opts.psThreshold;
+    doc["psActiveHigh"] = opts.psActiveHigh;
+    doc["ltAdcPin"] = opts.ltAdcPin;
+    doc["rtAdcPin"] = opts.rtAdcPin;
+    hmlStickToJson(doc.createNestedObject("leftStick"), opts.leftStick);
+    hmlStickToJson(doc.createNestedObject("rightStick"), opts.rightStick);
+    return serialize_json(doc);
+}
+
+std::string setHMLAnalogOptions()
+{
+    DynamicJsonDocument doc = get_post_data();
+    HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    opts.enabled = doc["enabled"];
+    opts.chLX = doc["chLX"]; opts.chLY = doc["chLY"];
+    opts.chRX = doc["chRX"]; opts.chRY = doc["chRY"];
+    opts.chPsButton = doc["chPsButton"];
+    opts.psThreshold = doc["psThreshold"];
+    opts.psActiveHigh = doc["psActiveHigh"];
+    opts.ltAdcPin = doc["ltAdcPin"];
+    opts.rtAdcPin = doc["rtAdcPin"];
+    hmlStickFromJson(doc["leftStick"], opts.leftStick);
+    hmlStickFromJson(doc["rightStick"], opts.rightStick);
+    opts.has_leftStick = true;
+    opts.has_rightStick = true;
+    EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true));
+    return serialize_json(doc);
+}
+
+std::string getHMLAnalogRaw()
+{
+    DynamicJsonDocument doc(JSON_OBJECT_SIZE(40));
+    HMLAnalogAddon::webRead(); // webconfig mode: addon loop is not running
+    JsonArray ch = doc.createNestedArray("channels");
+    for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) ch.add(HMLAnalogAddon::rawChannels[i]);
+    JsonArray adc = doc.createNestedArray("adc");
+    adc.add(HMLAnalogAddon::rawAdc[0]);
+    adc.add(HMLAnalogAddon::rawAdc[1]);
+    doc["valid"] = HMLAnalogAddon::rawValid;
+    Gamepad * gamepad = Storage::getInstance().GetProcessedGamepad();
+    doc["lx"] = gamepad->state.lx; doc["ly"] = gamepad->state.ly;
+    doc["rx"] = gamepad->state.rx; doc["ry"] = gamepad->state.ry;
+    doc["lt"] = gamepad->state.lt; doc["rt"] = gamepad->state.rt;
+    return serialize_json(doc);
+}
+
 std::string getHeldPins()
 {
     DynamicJsonDocument doc(JSON_OBJECT_SIZE(100));
@@ -2771,7 +2879,10 @@ static const std::pair<const char*, HandlerFuncPtr> handlerFuncs[] =
     { "/api/getSplashImage", getSplashImage },
     { "/api/getFirmwareVersion", getFirmwareVersion },
     { "/api/getMemoryReport", getMemoryReport },
-    { "/api/getHeldPins", getHeldPins },
+    { "/api/getHMLAnalogOptions", getHMLAnalogOptions },
+	{ "/api/setHMLAnalogOptions", setHMLAnalogOptions },
+	{ "/api/getHMLAnalogRaw", getHMLAnalogRaw },
+	{ "/api/getHeldPins", getHeldPins },
     { "/api/abortGetHeldPins", abortGetHeldPins },
     { "/api/getUsedPins", getUsedPins },
     { "/api/getConfig", getConfig },

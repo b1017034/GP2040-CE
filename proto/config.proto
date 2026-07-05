@@ -940,6 +940,54 @@ message AddonOptions
     optional GamepadUSBHostOptions gamepadUSBHostOptions = 28;
     optional TG16Options tg16Options = 29;
     optional HETriggerOptions heTriggerOptions = 30;
+    optional HMLAnalogOptions hmlAnalogOptions = 31;
+}
+
+message HMLStickOptions
+{
+    // Calibration: raw 16-bit ADC values
+    optional uint32 calMinX = 1;
+    optional uint32 calCenterX = 2;
+    optional uint32 calMaxX = 3;
+    optional uint32 calMinY = 4;
+    optional uint32 calCenterY = 5;
+    optional uint32 calMaxY = 6;
+    // Deadzones in percent
+    optional uint32 innerDeadzone = 7;
+    optional uint32 outerDeadzone = 8;
+    // Sensitivity curve: 0-4 presets, 5 = custom
+    optional uint32 curvePreset = 9;
+    optional uint32 curvePointCount = 10;
+    repeated uint32 curveX = 11 [(nanopb).max_count = 5];
+    repeated uint32 curveY = 12 [(nanopb).max_count = 5];
+    // RC filter (Firebird-compatible): strength -500..500
+    optional int32 rcFilterStrength = 13;
+    optional uint32 rcSnapback = 14;      // 0..100, simple mode uses 10
+    optional bool rcAdvanced = 15;
+    optional uint32 rcCurvePointCount = 16;
+    repeated uint32 rcCurveX = 17 [(nanopb).max_count = 5];  // velocity 0..128
+    repeated int32 rcCurveY = 18 [(nanopb).max_count = 5];   // strength -500..500
+    optional uint32 rcVelocityMult100 = 19;                  // x100, 0..1000
+    optional bool invertX = 20;
+    optional bool invertY = 21;
+}
+
+message HMLAnalogOptions
+{
+    optional bool enabled = 1;
+    // ADS8332 channel assignments (0-7, -1 = unassigned)
+    optional int32 chLX = 2;
+    optional int32 chLY = 3;
+    optional int32 chRX = 4;
+    optional int32 chRY = 5;
+    optional int32 chPsButton = 6;
+    optional uint32 psThreshold = 7;      // raw 16-bit threshold
+    optional bool psActiveHigh = 8;
+    // Analog triggers on RP2040 ADC pins (26/27), -1 = disabled
+    optional int32 ltAdcPin = 9;
+    optional int32 rtAdcPin = 10;
+    optional HMLStickOptions leftStick = 11;
+    optional HMLStickOptions rightStick = 12;
 }
 
 message MigrationHistory

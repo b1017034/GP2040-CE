@@ -123,6 +123,37 @@
     #define DEFAULT_PS4CONTROLLER_TYPE PS4_CONTROLLER
 #endif
 
+#ifndef HML_ANALOG_ENABLED
+    #define HML_ANALOG_ENABLED 0
+#endif
+#ifndef HML_ANALOG_CH_LX
+    #define HML_ANALOG_CH_LX 0
+#endif
+#ifndef HML_ANALOG_CH_LY
+    #define HML_ANALOG_CH_LY 1
+#endif
+#ifndef HML_ANALOG_CH_RX
+    #define HML_ANALOG_CH_RX 2
+#endif
+#ifndef HML_ANALOG_CH_RY
+    #define HML_ANALOG_CH_RY 3
+#endif
+#ifndef HML_ANALOG_CH_PS
+    #define HML_ANALOG_CH_PS 4
+#endif
+#ifndef HML_ANALOG_PS_THRESHOLD
+    #define HML_ANALOG_PS_THRESHOLD 32768
+#endif
+#ifndef HML_ANALOG_PS_ACTIVE_HIGH
+    #define HML_ANALOG_PS_ACTIVE_HIGH false
+#endif
+#ifndef HML_ANALOG_LT_ADC_PIN
+    #define HML_ANALOG_LT_ADC_PIN -1
+#endif
+#ifndef HML_ANALOG_RT_ADC_PIN
+    #define HML_ANALOG_RT_ADC_PIN -1
+#endif
+
 #ifndef DEFAULT_DEBOUNCE_DELAY
     #define DEFAULT_DEBOUNCE_DELAY 5
 #endif
@@ -1093,6 +1124,40 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
 
     // reminder that this must be set or else nanopb won't retain anything
     config.addonOptions.heTriggerOptions.triggers_count = HETRIGGER_COUNT;
+
+    // addonOptions.hmlAnalogOptions (HML board: ADS8332 sticks + RC filter)
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, enabled, !!HML_ANALOG_ENABLED);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chLX, HML_ANALOG_CH_LX);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chLY, HML_ANALOG_CH_LY);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chRX, HML_ANALOG_CH_RX);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chRY, HML_ANALOG_CH_RY);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chPsButton, HML_ANALOG_CH_PS);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, psThreshold, HML_ANALOG_PS_THRESHOLD);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, psActiveHigh, HML_ANALOG_PS_ACTIVE_HIGH);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, ltAdcPin, HML_ANALOG_LT_ADC_PIN);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, rtAdcPin, HML_ANALOG_RT_ADC_PIN);
+    for (auto* stick : { &config.addonOptions.hmlAnalogOptions.leftStick,
+                         &config.addonOptions.hmlAnalogOptions.rightStick }) {
+        INIT_UNSET_PROPERTY((*stick), calMinX, 0);
+        INIT_UNSET_PROPERTY((*stick), calCenterX, 0);
+        INIT_UNSET_PROPERTY((*stick), calMaxX, 0);
+        INIT_UNSET_PROPERTY((*stick), calMinY, 0);
+        INIT_UNSET_PROPERTY((*stick), calCenterY, 0);
+        INIT_UNSET_PROPERTY((*stick), calMaxY, 0);
+        INIT_UNSET_PROPERTY((*stick), innerDeadzone, 5);
+        INIT_UNSET_PROPERTY((*stick), outerDeadzone, 5);
+        INIT_UNSET_PROPERTY((*stick), curvePreset, 0);
+        INIT_UNSET_PROPERTY((*stick), curvePointCount, 3);
+        INIT_UNSET_PROPERTY((*stick), rcFilterStrength, 0);
+        INIT_UNSET_PROPERTY((*stick), rcSnapback, 10);
+        INIT_UNSET_PROPERTY((*stick), rcAdvanced, false);
+        INIT_UNSET_PROPERTY((*stick), rcCurvePointCount, 3);
+        INIT_UNSET_PROPERTY((*stick), rcVelocityMult100, 100);
+        INIT_UNSET_PROPERTY((*stick), invertX, false);
+        INIT_UNSET_PROPERTY((*stick), invertY, false);
+    }
+    config.addonOptions.hmlAnalogOptions.has_leftStick = true;
+    config.addonOptions.hmlAnalogOptions.has_rightStick = true;
 
     // keyboardMapping
     INIT_UNSET_PROPERTY(config.addonOptions.keyboardHostOptions, enabled, KEYBOARD_HOST_ENABLED);

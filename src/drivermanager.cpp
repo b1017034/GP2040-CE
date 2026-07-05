@@ -77,7 +77,10 @@ void DriverManager::setup(InputMode mode) {
             driver = new SwitchProDriver();
             break;
         default:
-            return;
+            // Unknown mode (e.g. config written by vendor firmware) - fall back to XInput
+            driver = new XInputDriver();
+            mode = INPUT_MODE_XINPUT;
+            break;
     }
 
     // Initialize our chosen driver
