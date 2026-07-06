@@ -13,9 +13,16 @@ void ADS8332::init() {
 }
 
 uint16_t ADS8332::frame(uint16_t tx) {
-    spi->beginTransaction(ADS8332_SPI_SPEED_MHZ, spi_order_t::SPI_MSB_FIRST, ADS8332_SPI_MODE);
+    spi->beginTransaction(ADS8332_SPI_SPEED_HZ, spi_order_t::SPI_MSB_FIRST, ADS8332_SPI_MODE);
+    // PeripheralSPI hardcodes 8-bit frames; the ADS8332 command word is 16 bits
+    spi_cpol_t cpol = (ADS8332_SPI_MODE == SPIMode::SPI_MODE2 || ADS8332_SPI_MODE == SPIMode::SPI_MODE3) ? SPI_CPOL_1 : SPI_CPOL_0;
+    spi_cpha_t cpha = (ADS8332_SPI_MODE == SPIMode::SPI_MODE1 || ADS8332_SPI_MODE == SPIMode::SPI_MODE3) ? SPI_CPHA_1 : SPI_CPHA_0;
+    spi_set_format(spi->getController(), 16, cpol, cpha, SPI_MSB_FIRST);
     spi->select(csPin);
-    uint16_t rx = spi->transfer16(tx);
+    busy_wait_us(2); // pull-driven CS needs settle time
+    uint16_t rx;
+    spi_write16_read16_blocking(spi->getController(), &tx, &rx, 1);
+    busy_wait_us(2);
     spi->deselect();
     spi->endTransaction();
     return rx;

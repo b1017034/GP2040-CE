@@ -10,8 +10,8 @@
 
 #define ADS8332_CHANNEL_COUNT 8
 
-#ifndef ADS8332_SPI_SPEED_MHZ
-#define ADS8332_SPI_SPEED_MHZ 4
+#ifndef ADS8332_SPI_SPEED_HZ
+#define ADS8332_SPI_SPEED_HZ 2000000 // PeripheralSPI beginTransaction takes Hz despite the param name
 #endif
 
 #ifndef ADS8332_SPI_MODE
