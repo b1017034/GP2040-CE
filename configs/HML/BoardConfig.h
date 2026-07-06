@@ -29,8 +29,6 @@
 #define GPIO_PIN_21 GpioAction::BUTTON_PRESS_R1
 #define GPIO_PIN_22 GpioAction::BUTTON_PRESS_L1
 #define GPIO_PIN_23 GpioAction::BUTTON_PRESS_UP
-#define GPIO_PIN_28 GpioAction::BUTTON_PRESS_R2
-#define GPIO_PIN_29 GpioAction::BUTTON_PRESS_L2
 // Pins 4-7, 10, 11, 20, 24, 25, 26, 27 intentionally left unmapped:
 // getHeldPins probes them with pull-downs to find the FPC PS button line.
 
@@ -44,8 +42,16 @@
 #define HML_ANALOG_CH_PS 4
 #define HML_ANALOG_PS_THRESHOLD 32768
 // Analog triggers on RP2040 ADC (from stock firmware analysis)
-#define HML_ANALOG_LT_ADC_PIN -1  // raw ADC26; disabled until trigger calibration exists
-#define HML_ANALOG_RT_ADC_PIN -1  // raw ADC27; disabled until trigger calibration exists
+#define HML_ANALOG_LT_ADC_PIN 26
+#define HML_ANALOG_RT_ADC_PIN 28
+
+// Trigger calibration: raw ADC counts at rest / fully pressed (pressed pulls low)
+#define HML_TRIGGER_LT_IDLE 4060
+#define HML_TRIGGER_LT_PRESSED 20
+#define HML_TRIGGER_RT_IDLE 2057
+#define HML_TRIGGER_RT_PRESSED 20
+// Digital L2/R2 fire above this fraction of travel (percent)
+#define HML_TRIGGER_DIGITAL_PERCENT 40
 
 // Boot combos: hold button while plugging in to select input mode
 // B2 (right face) = XInput, B4 (top face) = PS4, R2 = P5 General (PS5)

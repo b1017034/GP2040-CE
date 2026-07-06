@@ -44,6 +44,7 @@ public:
     // Synchronous read for webconfig mode (addon loop does not run there)
     static bool webRead();
     static HMLAnalogAddon* instance;
+    ADS8332* getAds() { return ads; }
 
 private:
     float calibrate(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_t mx);

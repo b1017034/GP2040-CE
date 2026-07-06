@@ -2606,11 +2606,65 @@ std::string getHMLAnalogRaw()
     adc.add(HMLAnalogAddon::rawAdc[0]);
     adc.add(HMLAnalogAddon::rawAdc[1]);
     doc["valid"] = HMLAnalogAddon::rawValid;
+    if (HMLAnalogAddon::instance != nullptr && HMLAnalogAddon::instance->getAds() != nullptr) {
+        ADS8332 * a = HMLAnalogAddon::instance->getAds();
+        doc["linkOk"] = a->linkOk;
+        doc["spiMode"] = a->probedMode;
+        doc["stitch"] = a->stitch;
+        doc["csPin"] = a->probedCs;
+        doc["hwCs"] = a->hwCs;
+        JsonArray found = doc.createNestedArray("foundCs");
+        for (int i = 0; i < a->foundCount; i++) {
+            JsonObject fo = found.createNestedObject();
+            fo["cs"] = a->foundCs[i];
+            fo["mode"] = a->foundModes[i];
+            fo["hw"] = a->foundHw[i];
+        }
+    }
     Gamepad * gamepad = Storage::getInstance().GetProcessedGamepad();
     doc["lx"] = gamepad->state.lx; doc["ly"] = gamepad->state.ly;
     doc["rx"] = gamepad->state.rx; doc["ry"] = gamepad->state.ry;
     doc["lt"] = gamepad->state.lt; doc["rt"] = gamepad->state.rt;
     return serialize_json(doc);
+}
+
+
+std::string setHMLMuxProbe()
+{
+    DynamicJsonDocument doc = get_post_data();
+    uint32_t value = doc["value"];
+    JsonArray pins = doc["pins"];
+    DynamicJsonDocument res(JSON_OBJECT_SIZE(16));
+    JsonArray applied = res.createNestedArray("applied");
+    int bit = 0;
+    for (JsonVariant p : pins) {
+        int pin = p.as<int>();
+        if (pin >= 0 && pin < 30) {
+            gpio_init(pin);
+            gpio_set_dir(pin, GPIO_OUT);
+            gpio_put(pin, (value >> bit) & 1);
+            JsonObject o = applied.createNestedObject();
+            o["pin"] = pin;
+            o["level"] = (int)((value >> bit) & 1);
+        }
+        bit++;
+    }
+    res["value"] = value;
+    // Read all four native ADC channels (GPIO26-29) under this pin state
+    static bool adc4Init = false;
+    if (!adc4Init) {
+        adc_gpio_init(26); adc_gpio_init(27); adc_gpio_init(28); adc_gpio_init(29);
+        adc4Init = true;
+    }
+    busy_wait_us(50); // let the analog settle after pin changes
+    JsonArray adc4 = res.createNestedArray("adc4");
+    for (int i = 0; i < 4; i++) {
+        adc_select_input(i);
+        busy_wait_us(5);
+        (void)adc_read(); // discard first after mux switch
+        adc4.add(adc_read());
+    }
+    return serialize_json(res);
 }
 
 std::string getHeldPins()
@@ -2882,6 +2936,7 @@ static const std::pair<const char*, HandlerFuncPtr> handlerFuncs[] =
     { "/api/getHMLAnalogOptions", getHMLAnalogOptions },
 	{ "/api/setHMLAnalogOptions", setHMLAnalogOptions },
 	{ "/api/getHMLAnalogRaw", getHMLAnalogRaw },
+	{ "/api/setHMLMuxProbe", setHMLMuxProbe },
 	{ "/api/getHeldPins", getHeldPins },
     { "/api/abortGetHeldPins", abortGetHeldPins },
     { "/api/getUsedPins", getUsedPins },

@@ -31,7 +31,7 @@ void HMLAnalogAddon::setup() {
     const PeripheralOptions& periph = Storage::getInstance().getPeripheralOptions();
 
     PeripheralSPI *spi = PeripheralManager::getInstance().getSPI(0);
-    ads = new ADS8332(spi, periph.blockSPI0.cs);
+    ads = new ADS8332(spi, periph.blockSPI0.cs, periph.blockSPI0.rx);
     ads->init();
 
     if (opts.ltAdcPin >= 26 && opts.ltAdcPin <= 29) adc_gpio_init(opts.ltAdcPin);
@@ -260,9 +260,28 @@ void HMLAnalogAddon::process() {
         gamepad->state.ry = (uint16_t)std::clamp((ry + 1.0f) * 32767.5f, 0.0f, 65535.0f);
     }
 
-    // Analog triggers (12-bit ADC -> 8-bit)
-    if (opts.ltAdcPin >= 26) gamepad->state.lt = (uint8_t)(rawAdc[0] >> 4);
-    if (opts.rtAdcPin >= 26) gamepad->state.rt = (uint8_t)(rawAdc[1] >> 4);
+    // Analog triggers: hall outputs idle high and pull toward 0 when pressed.
+    // Map [idle..pressed] to [0..255] per-trigger.
+    auto triggerTravel = [](uint16_t raw, int idle, int pressed) -> uint8_t {
+        int span = idle - pressed;
+        if (span <= 0) return 0;
+        int travel = idle - (int)raw;
+        if (travel < 0) travel = 0;
+        int v = travel * 255 / span;
+        return (uint8_t)(v > 255 ? 255 : v);
+    };
+    if (opts.ltAdcPin >= 26) {
+        uint8_t lt = triggerTravel(rawAdc[0], HML_TRIGGER_LT_IDLE, HML_TRIGGER_LT_PRESSED);
+        gamepad->state.lt = lt;
+        if (lt >= (255 * HML_TRIGGER_DIGITAL_PERCENT / 100))
+            gamepad->state.buttons |= GAMEPAD_MASK_L2;
+    }
+    if (opts.rtAdcPin >= 26) {
+        uint8_t rt = triggerTravel(rawAdc[1], HML_TRIGGER_RT_IDLE, HML_TRIGGER_RT_PRESSED);
+        gamepad->state.rt = rt;
+        if (rt >= (255 * HML_TRIGGER_DIGITAL_PERCENT / 100))
+            gamepad->state.buttons |= GAMEPAD_MASK_R2;
+    }
 
     lastMicros = to_us_since_boot(get_absolute_time());
 }
