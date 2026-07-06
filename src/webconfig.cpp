@@ -2571,6 +2571,8 @@ std::string getHMLAnalogOptions()
     doc["psActiveHigh"] = opts.psActiveHigh;
     doc["ltAdcPin"] = opts.ltAdcPin;
     doc["rtAdcPin"] = opts.rtAdcPin;
+    doc["l3Pin"] = opts.l3Pin;
+    doc["r3Pin"] = opts.r3Pin;
     hmlStickToJson(doc.createNestedObject("leftStick"), opts.leftStick);
     hmlStickToJson(doc.createNestedObject("rightStick"), opts.rightStick);
     return serialize_json(doc);
@@ -2588,6 +2590,8 @@ std::string setHMLAnalogOptions()
     opts.psActiveHigh = doc["psActiveHigh"];
     opts.ltAdcPin = doc["ltAdcPin"];
     opts.rtAdcPin = doc["rtAdcPin"];
+    opts.l3Pin = doc["l3Pin"];
+    opts.r3Pin = doc["r3Pin"];
     hmlStickFromJson(doc["leftStick"], opts.leftStick);
     hmlStickFromJson(doc["rightStick"], opts.rightStick);
     opts.has_leftStick = true;
@@ -2607,6 +2611,7 @@ std::string getHMLAnalogRaw()
     adc.add(HMLAnalogAddon::rawAdc[0]);
     adc.add(HMLAnalogAddon::rawAdc[1]);
     doc["valid"] = HMLAnalogAddon::rawValid;
+    doc["gpio"] = gpio_get_all();  // raw pin levels for the visual tester
     if (HMLAnalogAddon::instance != nullptr && HMLAnalogAddon::instance->getAds() != nullptr) {
         ADS8332 * a = HMLAnalogAddon::instance->getAds();
         doc["linkOk"] = a->linkOk;

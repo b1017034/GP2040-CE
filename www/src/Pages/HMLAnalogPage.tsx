@@ -11,6 +11,7 @@ import {
 	Tabs,
 } from 'react-bootstrap';
 import Http from '../Services/Http';
+import GamepadTester from '../Components/GamepadTester';
 import { baseUrl } from '../Services/WebApi';
 
 const CURVE_PRESETS: Record<number, { label: string; pts: number[][] }> = {
@@ -39,12 +40,14 @@ type Options = {
 	chLX: number; chLY: number; chRX: number; chRY: number;
 	chPsButton: number; psThreshold: number; psActiveHigh: boolean;
 	ltAdcPin: number; rtAdcPin: number;
+	l3Pin: number; r3Pin: number;
 	leftStick: StickOpts; rightStick: StickOpts;
 };
 
 type RawData = {
 	channels: number[];
 	adc: number[];
+	gpio?: number;
 	valid: boolean;
 	lx: number; ly: number; rx: number; ry: number;
 	lt: number; rt: number;
@@ -342,6 +345,17 @@ export default function HMLAnalogPage() {
 	return (
 		<div>
 			<h1>HML スティック設定</h1>
+			<Card className="mb-3">
+				<Card.Header>ライブテスター（入力がどこで反応しているか）</Card.Header>
+				<Card.Body>
+					{raw?.valid ? (
+						<GamepadTester raw={raw} opts={opts} />
+					) : (
+						<Alert variant="warning" className="mb-0">ライブ値が取得できません。</Alert>
+					)}
+				</Card.Body>
+			</Card>
+
 			<Card className="mb-3">
 				<Card.Header>ADS8332 ライブ生値（チャンネル特定に使用）</Card.Header>
 				<Card.Body>

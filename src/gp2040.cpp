@@ -479,7 +479,7 @@ GP2040::BootAction GP2040::getGpioMappedBootAction() {
 GP2040::RebootHotkeys::RebootHotkeys() :
 	active(false),
 	noButtonsPressedTimeout(nil_time),
-	webConfigHotkeyMask(GAMEPAD_MASK_S2 | GAMEPAD_MASK_B3 | GAMEPAD_MASK_B4),
+	webConfigHotkeyMask(GAMEPAD_MASK_S1 | GAMEPAD_MASK_S2 | GAMEPAD_MASK_R1), // Share+Options+R1, GNS-style
 	bootselHotkeyMask(GAMEPAD_MASK_S1 | GAMEPAD_MASK_B3 | GAMEPAD_MASK_B4),
 	rebootHotkeysHoldTimeout(nil_time) {
 }

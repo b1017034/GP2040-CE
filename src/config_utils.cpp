@@ -153,6 +153,12 @@
 #ifndef HML_ANALOG_RT_ADC_PIN
     #define HML_ANALOG_RT_ADC_PIN -1
 #endif
+#ifndef HML_ANALOG_L3_PIN
+    #define HML_ANALOG_L3_PIN -1
+#endif
+#ifndef HML_ANALOG_R3_PIN
+    #define HML_ANALOG_R3_PIN -1
+#endif
 
 #ifndef DEFAULT_DEBOUNCE_DELAY
     #define DEFAULT_DEBOUNCE_DELAY 5
@@ -1136,6 +1142,8 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, psActiveHigh, HML_ANALOG_PS_ACTIVE_HIGH);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, ltAdcPin, HML_ANALOG_LT_ADC_PIN);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, rtAdcPin, HML_ANALOG_RT_ADC_PIN);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, l3Pin, HML_ANALOG_L3_PIN);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, r3Pin, HML_ANALOG_R3_PIN);
     for (auto* stick : { &config.addonOptions.hmlAnalogOptions.leftStick,
                          &config.addonOptions.hmlAnalogOptions.rightStick }) {
         INIT_UNSET_PROPERTY((*stick), calMinX, 0);

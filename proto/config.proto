@@ -988,6 +988,9 @@ message HMLAnalogOptions
     optional int32 rtAdcPin = 10;
     optional HMLStickOptions leftStick = 11;
     optional HMLStickOptions rightStick = 12;
+    // Stick click buttons (digital, active-low)
+    optional int32 l3Pin = 13;
+    optional int32 r3Pin = 14;
 }
 
 message MigrationHistory

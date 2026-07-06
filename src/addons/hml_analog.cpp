@@ -38,6 +38,18 @@ void HMLAnalogAddon::setup() {
     if (opts.rtAdcPin >= 26 && opts.rtAdcPin <= 29) adc_gpio_init(opts.rtAdcPin);
     adcInitialized = true;
 
+    // Stick click buttons: plain active-low inputs
+    if (opts.l3Pin >= 0 && opts.l3Pin < 30) {
+        gpio_init(opts.l3Pin);
+        gpio_set_dir(opts.l3Pin, GPIO_IN);
+        gpio_pull_up(opts.l3Pin);
+    }
+    if (opts.r3Pin >= 0 && opts.r3Pin < 30) {
+        gpio_init(opts.r3Pin);
+        gpio_set_dir(opts.r3Pin, GPIO_IN);
+        gpio_pull_up(opts.r3Pin);
+    }
+
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
     if (opts.ltAdcPin >= 0 || opts.rtAdcPin >= 0)
         gamepad->hasAnalogTriggers = true;
@@ -122,12 +134,19 @@ static float rcStrengthForVelocity(const HMLStickOptions& s, float vel128) {
 static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength, uint32_t snapback, float dtMs) {
     float corrected;
     if (strength > 0.5f) {
-        float alpha = 1.0f / (1.0f + strength * 0.02f * dtMs);
+        // First-order low-pass with a time constant that scales linearly with
+        // strength: +100 -> 20ms (light), +250 -> 50ms, +500 -> 100ms (heavy,
+        // clearly visible smoothing/lag).
+        float tauMs = strength * 0.2f;
+        float alpha = dtMs / (tauMs + dtMs);
         filt += alpha * (raw - filt);
         corrected = filt;
     } else if (strength < -0.5f) {
-        float boost = -strength * 0.004f;
-        corrected = raw + boost * (raw - prevRaw);
+        // Inverse boost: velocity-proportional overshoot, normalized per-ms so
+        // the effect is loop-rate independent. -500 -> ~15ms of lead.
+        float vel = (raw - prevRaw) / dtMs;
+        float boost = -strength * 0.03f;
+        corrected = raw + boost * vel;
         filt = raw;
     } else {
         filt = raw;
@@ -225,15 +244,22 @@ void HMLAnalogAddon::preprocess() {
     }
     rawValid = true;
 
+    Gamepad *gamepad = Storage::getInstance().GetGamepad();
+
     // Analog PS/Home button (SMD button behind headphone jack, rightMt line)
     if (opts.chPsButton >= 0 && opts.chPsButton < ADS8332_CHANNEL_COUNT) {
-        Gamepad *gamepad = Storage::getInstance().GetGamepad();
         uint16_t v = rawChannels[opts.chPsButton];
         bool pressed = opts.psActiveHigh ? (v >= opts.psThreshold) : (v <= opts.psThreshold);
         if (pressed) {
             gamepad->state.buttons |= GAMEPAD_MASK_A1;
         }
     }
+
+    // Stick clicks (active low)
+    if (opts.l3Pin >= 0 && opts.l3Pin < 30 && !gpio_get(opts.l3Pin))
+        gamepad->state.buttons |= GAMEPAD_MASK_L3;
+    if (opts.r3Pin >= 0 && opts.r3Pin < 30 && !gpio_get(opts.r3Pin))
+        gamepad->state.buttons |= GAMEPAD_MASK_R3;
 }
 
 void HMLAnalogAddon::process() {

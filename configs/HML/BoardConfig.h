@@ -44,6 +44,9 @@
 // Analog triggers on RP2040 ADC (from stock firmware analysis)
 #define HML_ANALOG_LT_ADC_PIN 26
 #define HML_ANALOG_RT_ADC_PIN 28
+// Stick click switches (verified as SIO inputs w/ pull-up in stock firmware)
+#define HML_ANALOG_L3_PIN 24
+#define HML_ANALOG_R3_PIN 25
 
 // Trigger calibration: raw ADC counts at rest / fully pressed (pressed pulls low)
 #define HML_TRIGGER_LT_IDLE 4060
