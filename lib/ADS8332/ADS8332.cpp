@@ -42,8 +42,11 @@ void ADS8332::decode(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t
         value = (uint16_t)(msb << 15) | (rx[0] >> 1);
         tag = (uint8_t)(((rx[0] & 1) << 3) | (rx[1] >> 13));
     } else {
+        // word0 = 16-bit conversion result; word1 top 3 bits [15:13] = channel
+        // TAG (bit12 is a trailing zero). Reading >>12 loses the tag LSB and
+        // only ever yields even channels, so use >>13.
         value = rx[0];
-        tag = (uint8_t)(rx[1] >> 12);
+        tag = (uint8_t)(rx[1] >> 13);
     }
 }
 
@@ -161,18 +164,40 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
         return;
     }
 
-    // Software CS: TAG-binned auto-sequencing reads (32 clocks per frame)
-    uint8_t seen = 0;
+    // Software CS + auto-sequencing + TAG binning. Manual channel select is
+    // silently ignored by this part, so auto mode is the only way to address
+    // all channels. Individual frames occasionally mispair tag and data
+    // (read races the sequencer), so gather many frames and take the median
+    // per bin - mispairs become outliers and drop out.
     uint16_t tx[2] = { ADS8332_CMD_READ_DATA, 0x0000 };
-    for (uint8_t attempt = 0; attempt < 16 && seen != 0xFF; attempt++) {
+    uint16_t samples[ADS8332_CHANNEL_COUNT][5];
+    uint8_t counts[ADS8332_CHANNEL_COUNT] = {0};
+    for (uint8_t attempt = 0; attempt < 48; attempt++) {
         uint16_t rx[2];
         uint8_t msb = burst(tx, rx, 2);
         uint16_t value; uint8_t tag;
         decode(msb, rx, value, tag);
-        if (tag < ADS8332_CHANNEL_COUNT) {
-            values[tag] = value;
-            seen |= (1 << tag);
+        if (tag < ADS8332_CHANNEL_COUNT && counts[tag] < 5) {
+            samples[tag][counts[tag]++] = value;
         }
-        busy_wait_us(3); // let the sequencer advance to other channels
+        busy_wait_us(4); // let the sequencer advance
+        // stop early once every bin has enough samples for a median
+        bool done = true;
+        for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
+            if (counts[i] < 3) { done = false; break; }
+        if (done) break;
+    }
+    for (uint8_t ch = 0; ch < ADS8332_CHANNEL_COUNT; ch++) {
+        uint8_t n = counts[ch];
+        if (n == 0) continue;              // keep previous value
+        // insertion-sort the few samples and take the middle one
+        uint16_t *s = samples[ch];
+        for (uint8_t i = 1; i < n; i++) {
+            uint16_t key = s[i];
+            int8_t j = i - 1;
+            while (j >= 0 && s[j] > key) { s[j + 1] = s[j]; j--; }
+            s[j + 1] = key;
+        }
+        values[ch] = s[n / 2];
     }
 }

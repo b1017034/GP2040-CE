@@ -32,12 +32,12 @@
 // Common CFR bits: D10=1 internal conversion clock, D9=0 auto-trigger,
 // D8=0 500kSPS, D7=0/D6=1/D5=1 EOC output (unused), D4=1 no auto-nap,
 // D3=1/D2=1 no power-down, D0=1 normal operation
-// Strategy A: D11=0 manual channel select, D8=1 250kSPS (doubled acquisition
-// window - hall sensors have high source impedance and need S/H settle time),
-// D1=0 TAG off
-#define ADS8332_CFR_MANUAL   0x057D
-// Strategy B: D11=1 auto channel sequencing, D1=1 TAG on
-#define ADS8332_CFR_AUTO_TAG 0x0D7F
+// Strategy A: D11=0 manual channel select, D1=0 TAG off
+#define ADS8332_CFR_MANUAL   0x047D
+// Auto mode: D11=1 auto channel sequencing, D10=0 CCLK=SCLK/2 (conversions
+// advance ONLY while SPI clocks run - the sequencer freezes between frames,
+// so TAG and data stay deterministically paired), D1=1 TAG on
+#define ADS8332_CFR_AUTO_TAG 0x087F
 
 class ADS8332 {
 public:
