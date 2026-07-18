@@ -16,7 +16,6 @@ import AddonsConfigPage from './Pages/AddonsConfigPage';
 import BackupPage from './Pages/BackupPage';
 import PlaygroundPage from './Pages/PlaygroundPage';
 import InputMacroAddonPage from './Pages/InputMacroAddonPage';
-import HMLAnalogPage from './Pages/HMLAnalogPage';
 
 import './App.scss';
 import BootModeMappingPage from './Pages/BootModeMapping';
@@ -44,7 +43,6 @@ const App = () => {
 						<Route path="/backup" element={<BackupPage />} />
 						<Route path="/playground" element={<PlaygroundPage />} />
 						<Route path="/macro" element={<InputMacroAddonPage />} />
-						<Route path="/hml-analog" element={<HMLAnalogPage />} />
 					</Routes>
 				</div>
 			</Router>

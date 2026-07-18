@@ -46,6 +46,9 @@ public:
 
     void init();
     // Read all 8 channels; channels not read keep their previous values.
+    // Software-CS mode does a bounded number of SPI bursts per call and
+    // accumulates across calls, so a single call stays well under the 1ms
+    // USB frame budget; values[] updates once a full scan completes.
     void readAll(uint16_t values[ADS8332_CHANNEL_COUNT]);
 
     // Diagnostics (exposed via webconfig)
@@ -69,6 +72,11 @@ private:
     PeripheralSPI *spi;
     int8_t csPin;
     int8_t rxPin;
+
+    // In-progress auto-sequence scan state (software CS mode)
+    uint16_t seqSamples[ADS8332_CHANNEL_COUNT][5];
+    uint8_t seqCounts[ADS8332_CHANNEL_COUNT] = {0};
+    uint8_t seqAttempts = 0;
 };
 
 #endif

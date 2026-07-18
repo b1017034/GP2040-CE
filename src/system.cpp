@@ -64,7 +64,11 @@ void System::reboot(BootMode bootMode) {
 
     // Make sure that the other core is halted
     // We do not want it to be talking to devices (e.g. OLED display) while we reboot
-	multicore_lockout_start_timeout_us(0xfffffffffffffff);
+	// Bounded wait + proceed regardless: if core1 is busy (e.g. running the
+	// PIO-USB host for the PS5 dongle in web-config) it may never answer the
+	// lockout, and an unbounded wait hangs the reboot ("can't leave web-config").
+	// The watchdog reset below resets both cores anyway.
+	multicore_lockout_start_timeout_us(500000);
 
 	watchdog_hw->scratch[5] = static_cast<uint32_t>(bootMode);
 

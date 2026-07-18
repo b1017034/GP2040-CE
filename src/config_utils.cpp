@@ -159,6 +159,30 @@
 #ifndef HML_ANALOG_R3_PIN
     #define HML_ANALOG_R3_PIN -1
 #endif
+#ifndef HML_ANALOG_CH_L3
+    #define HML_ANALOG_CH_L3 -1
+#endif
+#ifndef HML_ANALOG_CH_R3
+    #define HML_ANALOG_CH_R3 -1
+#endif
+#ifndef HML_ANALOG_L3_ACTIVE_HIGH
+    #define HML_ANALOG_L3_ACTIVE_HIGH false
+#endif
+#ifndef HML_ANALOG_R3_ACTIVE_HIGH
+    #define HML_ANALOG_R3_ACTIVE_HIGH false
+#endif
+#ifndef HML_LIGHTBAR_ENABLED
+    #define HML_LIGHTBAR_ENABLED false
+#endif
+#ifndef HML_LIGHTBAR_PIN
+    #define HML_LIGHTBAR_PIN -1
+#endif
+#ifndef HML_LIGHTBAR_BRIGHTNESS
+    #define HML_LIGHTBAR_BRIGHTNESS 128
+#endif
+#ifndef HML_LIGHTBAR_COLOR
+    #define HML_LIGHTBAR_COLOR 0x000040
+#endif
 
 #ifndef DEFAULT_DEBOUNCE_DELAY
     #define DEFAULT_DEBOUNCE_DELAY 5
@@ -202,6 +226,11 @@
 
 #ifndef DEFAULT_USB_ID_OVERRIDE
    #define DEFAULT_USB_ID_OVERRIDE false
+#endif
+
+// USB poll rate in Hz (0 = use each input mode's stock bInterval)
+#ifndef DEFAULT_USB_POLL_RATE
+   #define DEFAULT_USB_POLL_RATE 0
 #endif
 
 #ifndef DEFAULT_USB_VENDOR_ID
@@ -358,6 +387,7 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.gamepadOptions, usbVendorID, DEFAULT_USB_VENDOR_ID);
     INIT_UNSET_PROPERTY(config.gamepadOptions, usbProductID, DEFAULT_USB_PRODUCT_ID);
     INIT_UNSET_PROPERTY(config.gamepadOptions, miniMenuGamepadInput, MINI_MENU_GAMEPAD_INPUT);
+    INIT_UNSET_PROPERTY(config.gamepadOptions, usbPollRate, DEFAULT_USB_POLL_RATE);
 
     // hotkeyOptions
     HotkeyOptions& hotkeyOptions = config.hotkeyOptions;
@@ -1144,6 +1174,16 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, rtAdcPin, HML_ANALOG_RT_ADC_PIN);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, l3Pin, HML_ANALOG_L3_PIN);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, r3Pin, HML_ANALOG_R3_PIN);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chL3, HML_ANALOG_CH_L3);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, l3Threshold, 32768);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, l3ActiveHigh, HML_ANALOG_L3_ACTIVE_HIGH);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, chR3, HML_ANALOG_CH_R3);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, r3Threshold, 32768);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, r3ActiveHigh, HML_ANALOG_R3_ACTIVE_HIGH);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarEnabled, HML_LIGHTBAR_ENABLED);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarPin, HML_LIGHTBAR_PIN);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarBrightness, HML_LIGHTBAR_BRIGHTNESS);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarColor, HML_LIGHTBAR_COLOR);
     for (auto* stick : { &config.addonOptions.hmlAnalogOptions.leftStick,
                          &config.addonOptions.hmlAnalogOptions.rightStick }) {
         INIT_UNSET_PROPERTY((*stick), calMinX, 0);
@@ -1157,12 +1197,34 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
         INIT_UNSET_PROPERTY((*stick), curvePreset, 0);
         INIT_UNSET_PROPERTY((*stick), curvePointCount, 3);
         INIT_UNSET_PROPERTY((*stick), rcFilterStrength, 0);
-        INIT_UNSET_PROPERTY((*stick), rcSnapback, 10);
+        INIT_UNSET_PROPERTY((*stick), rcSnapback, 0);
         INIT_UNSET_PROPERTY((*stick), rcAdvanced, false);
         INIT_UNSET_PROPERTY((*stick), rcCurvePointCount, 3);
         INIT_UNSET_PROPERTY((*stick), rcVelocityMult100, 100);
         INIT_UNSET_PROPERTY((*stick), invertX, false);
         INIT_UNSET_PROPERTY((*stick), invertY, false);
+        INIT_UNSET_PROPERTY((*stick), diagScaleX, 0);
+        INIT_UNSET_PROPERTY((*stick), diagScaleY, 0);
+        INIT_UNSET_PROPERTY((*stick), noiseSuppress, false);
+        INIT_UNSET_PROPERTY((*stick), noiseX, 0);
+        INIT_UNSET_PROPERTY((*stick), noiseY, 0);
+        INIT_UNSET_PROPERTY((*stick), scaleUp, 100);
+        INIT_UNSET_PROPERTY((*stick), scaleDown, 100);
+        INIT_UNSET_PROPERTY((*stick), scaleLeft, 100);
+        INIT_UNSET_PROPERTY((*stick), scaleRight, 100);
+        // migrate the old radial deadzones into the FireBird-style per-axis ones
+        INIT_UNSET_PROPERTY((*stick), innerX, stick->innerDeadzone);
+        INIT_UNSET_PROPERTY((*stick), innerY, stick->innerDeadzone);
+        INIT_UNSET_PROPERTY((*stick), outerX, 100 - stick->outerDeadzone);
+        INIT_UNSET_PROPERTY((*stick), outerY, 100 - stick->outerDeadzone);
+        INIT_UNSET_PROPERTY((*stick), antiX, 0);
+        INIT_UNSET_PROPERTY((*stick), antiY, 0);
+        INIT_UNSET_PROPERTY((*stick), resolution, 0);
+        INIT_UNSET_PROPERTY((*stick), delayMs, 0);
+        INIT_UNSET_PROPERTY((*stick), angleOffset100, 0);
+        INIT_UNSET_PROPERTY((*stick), angleSnap, 0);
+        INIT_UNSET_PROPERTY((*stick), angleMapCount, 0);
+        INIT_UNSET_PROPERTY((*stick), angleMapEnable, 0);
     }
     config.addonOptions.hmlAnalogOptions.has_leftStick = true;
     config.addonOptions.hmlAnalogOptions.has_rightStick = true;

@@ -27,7 +27,7 @@
 		"build": "npm run build-proto && npx vite build && npm run makefsdata",
 		"dev-server": "nodemon -r dotenv/config ./server/app.js",
 		"dev": "concurrently --kill-others \"npm run dev-server\" \"npm start\"",
-		"dev-board": "cross-env VITE_DEV_BASE_URL=http://192.168.7.1 npm start ",
+		"dev-board": "cross-env VITE_DEV_BASE_URL= VITE_PROXY_TARGET=http://192.168.7.1 VITE_DEV_HOST=0.0.0.0 npm start",
 		"format": "prettier --write \"{src,server,scripts}/**/*.{tsx,ts,jsx,js,json,scss}\"",
 		"lint": "eslint src --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0",
 		"makefsdata": "node makefsdata.js",

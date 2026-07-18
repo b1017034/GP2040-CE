@@ -52,6 +52,7 @@ message GamepadOptions
     optional uint32 usbVendorID = 31;
     optional uint32 miniMenuGamepadInput = 32;
     optional InputModeDeviceType inputDeviceType = 33;
+    optional uint32 usbPollRate = 34;
 }
 
 message KeyboardMapping
@@ -955,21 +956,58 @@ message HMLStickOptions
     // Deadzones in percent
     optional uint32 innerDeadzone = 7;
     optional uint32 outerDeadzone = 8;
-    // Sensitivity curve: 0-4 presets, 5 = custom
+    // Sensitivity curve: 0-4 presets, 5 = custom (FireBird: up to 10 markers)
     optional uint32 curvePreset = 9;
     optional uint32 curvePointCount = 10;
-    repeated uint32 curveX = 11 [(nanopb).max_count = 5];
-    repeated uint32 curveY = 12 [(nanopb).max_count = 5];
+    repeated uint32 curveX = 11 [(nanopb).max_count = 10];
+    repeated uint32 curveY = 12 [(nanopb).max_count = 10];
     // RC filter (Firebird-compatible): strength -500..500
     optional int32 rcFilterStrength = 13;
-    optional uint32 rcSnapback = 14;      // 0..100, simple mode uses 10
+    optional uint32 rcSnapback = 14;      // snapback filter strength 0..100
     optional bool rcAdvanced = 15;
     optional uint32 rcCurvePointCount = 16;
-    repeated uint32 rcCurveX = 17 [(nanopb).max_count = 5];  // velocity 0..128
-    repeated int32 rcCurveY = 18 [(nanopb).max_count = 5];   // strength -500..500
+    // RC curve: index 0 is 静止 (x forced 0), last is 最大速度 (x forced 128)
+    repeated uint32 rcCurveX = 17 [(nanopb).max_count = 7];  // velocity 0..128
+    repeated int32 rcCurveY = 18 [(nanopb).max_count = 7];   // strength -500..500
     optional uint32 rcVelocityMult100 = 19;                  // x100, 0..1000
     optional bool invertX = 20;
     optional bool invertY = 21;
+    // Firebird-style diagonal scaling: output boundary = min(unit square,
+    // ellipse with semi-axes 1 + 0.4142*d/100). 0 = perfect circle, 100 = square
+    optional uint32 diagScaleX = 22;
+    optional uint32 diagScaleY = 23;
+    // Noise gate (Firebird "動作の安定化"): hold raw output until it moves more
+    // than the measured at-rest noise band (raw 16-bit counts, peak-to-peak)
+    optional bool noiseSuppress = 24;
+    optional uint32 noiseX = 25;
+    optional uint32 noiseY = 26;
+    // FireBird 基本設定: per-direction input scale (%, 100 = calibrated range)
+    optional uint32 scaleUp = 27;
+    optional uint32 scaleDown = 28;
+    optional uint32 scaleLeft = 29;
+    optional uint32 scaleRight = 30;
+    // FireBird per-axis deadzones (%): inner 0 = none, outer 100 = full travel
+    // needed for max, anti = minimum output once outside inner
+    optional uint32 innerX = 31;
+    optional uint32 innerY = 32;
+    optional uint32 outerX = 33;
+    optional uint32 outerY = 34;
+    optional uint32 antiX = 35;
+    optional uint32 antiY = 36;
+    // FireBird 詳細設定: output resolution (0 = unlimited, else steps across
+    // full axis range) and extra input delay in ms
+    optional uint32 resolution = 37;
+    optional uint32 delayMs = 38;
+    // FireBird 角度補正: global rotation (deg x100), angle snap
+    // (0=off, 1=45deg, 2=90deg), and input->output angle map with per-entry
+    // snap deadzone (all deg x100); enable is a bitmask over entries
+    optional int32 angleOffset100 = 39;
+    optional uint32 angleSnap = 40;
+    optional uint32 angleMapCount = 41;
+    repeated int32 angleMapIn100 = 42 [(nanopb).max_count = 16];
+    repeated int32 angleMapOut100 = 43 [(nanopb).max_count = 16];
+    repeated uint32 angleMapDz100 = 44 [(nanopb).max_count = 16];
+    optional uint32 angleMapEnable = 45;
 }
 
 message HMLAnalogOptions
@@ -988,9 +1026,24 @@ message HMLAnalogOptions
     optional int32 rtAdcPin = 10;
     optional HMLStickOptions leftStick = 11;
     optional HMLStickOptions rightStick = 12;
-    // Stick click buttons (digital, active-low)
+    // Stick click buttons (digital GPIO, active-low; -1 = unused)
     optional int32 l3Pin = 13;
     optional int32 r3Pin = 14;
+    // Stick click buttons as ADS8332 analog channels (-1 = unused)
+    optional int32 chL3 = 15;
+    optional uint32 l3Threshold = 16;
+    optional bool l3ActiveHigh = 17;
+    optional int32 chR3 = 18;
+    optional uint32 r3Threshold = 19;
+    optional bool r3ActiveHigh = 20;
+    // Dedicated lightbar: a single WS2812 (GPIO20 on HML) driven directly from
+    // the console-sent lightbar color, bypassing the player-LED/animation path.
+    optional bool lightbarEnabled = 21;
+    optional int32 lightbarPin = 22;
+    optional uint32 lightbarBrightness = 23;  // 0-255
+    // Idle/override color (0xRRGGBB) shown when the console isn't driving the
+    // lightbar (and live in web-config); console color takes priority in-game.
+    optional uint32 lightbarColor = 24;
 }
 
 message MigrationHistory

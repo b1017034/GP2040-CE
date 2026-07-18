@@ -261,6 +261,7 @@ bool XInputDriver::process(Gamepad * gamepad) {
         | (gamepad->pressedRight() ? XBOX_MASK_RIGHT : 0)
         | (gamepad->pressedS2()    ? XBOX_MASK_START : 0)
         | (gamepad->pressedS1()    ? XBOX_MASK_BACK  : 0)
+        | (gamepad->pressedA2()    ? XBOX_MASK_BACK  : 0) // touchpad click: XInput has no touchpad, emit Back
         | (gamepad->pressedL3()    ? XBOX_MASK_LS    : 0)
         | (gamepad->pressedR3()    ? XBOX_MASK_RS    : 0)
     ;

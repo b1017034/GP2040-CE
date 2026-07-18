@@ -6,8 +6,11 @@
 #ifndef _USBDRIVER_CPP_
 #define _USBDRIVER_CPP_
 
+#include <string.h>
+
 #include "tusb.h"
 #include "drivermanager.h"
+#include "storagemanager.h"
 
 static bool usb_mounted;
 static bool usb_suspended;
@@ -88,11 +91,55 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
 	return DriverManager::getInstance().getDriver()->get_hid_descriptor_report_cb(itf);
 }
 
+// Rewrite the interrupt IN endpoint bInterval on interface 0 (the gamepad data
+// interface in every driver) to match the configured USB poll rate. Descriptors
+// are const flash arrays, so patch a RAM copy.
+static uint8_t const *applyUsbPollRate(uint8_t const *desc) {
+	static uint8_t patchedDesc[256];
+
+	if (desc == nullptr || DriverManager::getInstance().isConfigMode())
+		return desc;
+
+	uint32_t pollRateHz = Storage::getInstance().getGamepadOptions().usbPollRate;
+	if (pollRateHz == 0)
+		return desc;
+
+	uint16_t totalLength = (uint16_t)(desc[2] | (desc[3] << 8));
+	if (totalLength < TUD_CONFIG_DESC_LEN || totalLength > sizeof(patchedDesc))
+		return desc;
+
+	// 1000Hz -> 1ms, 500Hz -> 2ms, 250Hz -> 4ms, 125Hz -> 8ms
+	uint32_t interval = (pollRateHz >= 1000) ? 1 : (1000 / pollRateHz);
+	if (interval > 16)
+		interval = 16;
+
+	memcpy(patchedDesc, desc, totalLength);
+
+	uint16_t pos = 0;
+	int32_t itf = -1;
+	while (pos + 2 <= totalLength) {
+		uint8_t len = patchedDesc[pos];
+		uint8_t type = patchedDesc[pos + 1];
+		if (len < 2 || pos + len > totalLength)
+			break;
+		if (type == TUSB_DESC_INTERFACE && len >= 3) {
+			itf = patchedDesc[pos + 2];
+		} else if (type == TUSB_DESC_ENDPOINT && len >= 7 && itf == 0) {
+			uint8_t epAddr = patchedDesc[pos + 2];
+			uint8_t xferType = patchedDesc[pos + 3] & 0x03;
+			if ((epAddr & TUSB_DIR_IN_MASK) && xferType == TUSB_XFER_INTERRUPT)
+				patchedDesc[pos + 6] = (uint8_t)interval;
+		}
+		pos += len;
+	}
+	return patchedDesc;
+}
+
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
-	return DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index);
+	return applyUsbPollRate(DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index));
 }
 
 uint8_t const* tud_descriptor_device_qualifier_cb() {

@@ -278,8 +278,17 @@ void NeoPicoLEDAddon::setup() {
         ledCount += (int)ledOptions.caseRGBCount;
     }
 
-	// Setup NeoPico ws2812 PIO
-	neopico.Setup(ledOptions.dataPin, ledCount, static_cast<LEDFormat>(ledOptions.ledFormat), pio0, 0);
+	// Setup NeoPico ws2812 PIO. Default pio0/sm0, but a board can move it: the
+	// Pico-PIO-USB host (used for the PS5 auth dongle) claims pio0/sm0 for its
+	// TX, so a board with USB host must run the LEDs on a different PIO/SM or
+	// they silently never light.
+#ifndef NEOPICO_PIO_INSTANCE
+#define NEOPICO_PIO_INSTANCE pio0
+#endif
+#ifndef NEOPICO_PIO_SM
+#define NEOPICO_PIO_SM 0
+#endif
+	neopico.Setup(ledOptions.dataPin, ledCount, static_cast<LEDFormat>(ledOptions.ledFormat), NEOPICO_PIO_INSTANCE, NEOPICO_PIO_SM);
 	neopico.Off(); // turn off everything
 
 	// Rewrite this

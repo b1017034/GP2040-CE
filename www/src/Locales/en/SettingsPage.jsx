@@ -59,6 +59,8 @@ export default {
 	},
 	'profile-label': 'Profile',
 	'debounce-delay-label': 'Debounce Delay in milliseconds',
+	'usb-poll-rate-label': 'USB Polling Rate',
+	'usb-poll-rate-default': 'Mode Default',
 	'mini-menu-gamepad-input': 'Use Gamepad Input for Display Mini Menu',
 	'ps4-mode-explanation-text':
 		'PS4 mode allows GP2040-CE to run as an authenticated PS4 controller.',

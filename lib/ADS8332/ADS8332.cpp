@@ -1,4 +1,5 @@
 #include "ADS8332.h"
+#include <string.h>
 #include "pico/time.h"
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
@@ -169,29 +170,37 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
     // all channels. Individual frames occasionally mispair tag and data
     // (read races the sequencer), so gather many frames and take the median
     // per bin - mispairs become outliers and drop out.
+    //
+    // Bounded per call: 16 bursts (~370us) instead of a full 24-48 burst scan,
+    // carrying the bins across calls, so the caller's loop can stay above
+    // 1kHz for the USB report pipeline. A full scan completes every 2-3 calls.
     uint16_t tx[2] = { ADS8332_CMD_READ_DATA, 0x0000 };
-    uint16_t samples[ADS8332_CHANNEL_COUNT][5];
-    uint8_t counts[ADS8332_CHANNEL_COUNT] = {0};
-    for (uint8_t attempt = 0; attempt < 48; attempt++) {
+    bool done = false;
+    for (uint8_t burstN = 0; burstN < 16 && !done; burstN++) {
         uint16_t rx[2];
         uint8_t msb = burst(tx, rx, 2);
         uint16_t value; uint8_t tag;
         decode(msb, rx, value, tag);
-        if (tag < ADS8332_CHANNEL_COUNT && counts[tag] < 5) {
-            samples[tag][counts[tag]++] = value;
+        if (tag < ADS8332_CHANNEL_COUNT && seqCounts[tag] < 5) {
+            seqSamples[tag][seqCounts[tag]++] = value;
         }
+        seqAttempts++;
         busy_wait_us(4); // let the sequencer advance
-        // stop early once every bin has enough samples for a median
-        bool done = true;
+        // scan is complete once every bin has enough samples for a median
+        // (or we've burned the full attempt budget on mispairs)
+        done = true;
         for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
-            if (counts[i] < 3) { done = false; break; }
-        if (done) break;
+            if (seqCounts[i] < 3) { done = false; break; }
+        if (seqAttempts >= 48) done = true;
     }
+    if (!done)
+        return; // scan continues next call; values[] keeps previous data
+
     for (uint8_t ch = 0; ch < ADS8332_CHANNEL_COUNT; ch++) {
-        uint8_t n = counts[ch];
+        uint8_t n = seqCounts[ch];
         if (n == 0) continue;              // keep previous value
         // insertion-sort the few samples and take the middle one
-        uint16_t *s = samples[ch];
+        uint16_t *s = seqSamples[ch];
         for (uint8_t i = 1; i < n; i++) {
             uint16_t key = s[i];
             int8_t j = i - 1;
@@ -200,4 +209,6 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
         }
         values[ch] = s[n / 2];
     }
+    memset(seqCounts, 0, sizeof(seqCounts));
+    seqAttempts = 0;
 }

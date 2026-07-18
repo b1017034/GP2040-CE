@@ -685,6 +685,7 @@ std::string setGamepadOptions()
     readDoc(gamepadOptions.ps4ControllerIDMode, doc, "ps4ControllerIDMode");
     readDoc(gamepadOptions.usbDescOverride, doc, "usbDescOverride");
     readDoc(gamepadOptions.miniMenuGamepadInput, doc, "miniMenuGamepadInput");
+    readDoc(gamepadOptions.usbPollRate, doc, "usbPollRate");
     // Copy USB descriptor strings
     size_t strSize = sizeof(gamepadOptions.usbDescManufacturer);
     strncpy(gamepadOptions.usbDescManufacturer, doc["usbDescManufacturer"], strSize - 1);
@@ -759,6 +760,7 @@ std::string getGamepadOptions()
     writeDoc(doc, "usbDescVersion", gamepadOptions.usbDescVersion);
     writeDoc(doc, "usbOverrideID", gamepadOptions.usbOverrideID);
     writeDoc(doc, "miniMenuGamepadInput", gamepadOptions.miniMenuGamepadInput);
+    writeDoc(doc, "usbPollRate", gamepadOptions.usbPollRate);
     // Write USB Vendor ID and Product ID as 4 character hex strings with 0 padding
     char usbVendorStr[5];
     snprintf(usbVendorStr, 5, "%04X", (unsigned int)gamepadOptions.usbVendorID);
@@ -2532,6 +2534,30 @@ static void hmlStickToJson(JsonObject o, const HMLStickOptions& s)
     o["rcVelocityMult100"] = s.rcVelocityMult100;
     o["invertX"] = s.invertX;
     o["invertY"] = s.invertY;
+    o["diagScaleX"] = s.diagScaleX;
+    o["diagScaleY"] = s.diagScaleY;
+    o["noiseSuppress"] = s.noiseSuppress;
+    o["noiseX"] = s.noiseX;
+    o["noiseY"] = s.noiseY;
+    o["scaleUp"] = s.scaleUp;
+    o["scaleDown"] = s.scaleDown;
+    o["scaleLeft"] = s.scaleLeft;
+    o["scaleRight"] = s.scaleRight;
+    o["innerX"] = s.innerX; o["innerY"] = s.innerY;
+    o["outerX"] = s.outerX; o["outerY"] = s.outerY;
+    o["antiX"] = s.antiX; o["antiY"] = s.antiY;
+    o["resolution"] = s.resolution;
+    o["delayMs"] = s.delayMs;
+    o["angleOffset100"] = s.angleOffset100;
+    o["angleSnap"] = s.angleSnap;
+    o["angleMapCount"] = s.angleMapCount;
+    o["angleMapEnable"] = s.angleMapEnable;
+    JsonArray ai = o.createNestedArray("angleMapIn100");
+    JsonArray ao = o.createNestedArray("angleMapOut100");
+    JsonArray ad = o.createNestedArray("angleMapDz100");
+    for (unsigned i = 0; i < s.angleMapIn100_count; i++) ai.add(s.angleMapIn100[i]);
+    for (unsigned i = 0; i < s.angleMapOut100_count; i++) ao.add(s.angleMapOut100[i]);
+    for (unsigned i = 0; i < s.angleMapDz100_count; i++) ad.add(s.angleMapDz100[i]);
 }
 
 static void hmlStickFromJson(JsonVariant o, HMLStickOptions& s)
@@ -2544,24 +2570,50 @@ static void hmlStickFromJson(JsonVariant o, HMLStickOptions& s)
     s.curvePointCount = o["curvePointCount"];
     JsonArray cx = o["curveX"], cy = o["curveY"];
     s.curveX_count = 0; s.curveY_count = 0;
-    for (unsigned i = 0; i < cx.size() && i < 5; i++) { s.curveX[i] = cx[i]; s.curveX_count++; }
-    for (unsigned i = 0; i < cy.size() && i < 5; i++) { s.curveY[i] = cy[i]; s.curveY_count++; }
+    for (unsigned i = 0; i < cx.size() && i < 10; i++) { s.curveX[i] = cx[i]; s.curveX_count++; }
+    for (unsigned i = 0; i < cy.size() && i < 10; i++) { s.curveY[i] = cy[i]; s.curveY_count++; }
     s.rcFilterStrength = o["rcFilterStrength"];
     s.rcSnapback = o["rcSnapback"];
     s.rcAdvanced = o["rcAdvanced"];
     s.rcCurvePointCount = o["rcCurvePointCount"];
     JsonArray rx = o["rcCurveX"], ry = o["rcCurveY"];
     s.rcCurveX_count = 0; s.rcCurveY_count = 0;
-    for (unsigned i = 0; i < rx.size() && i < 5; i++) { s.rcCurveX[i] = rx[i]; s.rcCurveX_count++; }
-    for (unsigned i = 0; i < ry.size() && i < 5; i++) { s.rcCurveY[i] = ry[i]; s.rcCurveY_count++; }
+    for (unsigned i = 0; i < rx.size() && i < 7; i++) { s.rcCurveX[i] = rx[i]; s.rcCurveX_count++; }
+    for (unsigned i = 0; i < ry.size() && i < 7; i++) { s.rcCurveY[i] = ry[i]; s.rcCurveY_count++; }
     s.rcVelocityMult100 = o["rcVelocityMult100"];
     s.invertX = o["invertX"];
     s.invertY = o["invertY"];
+    s.diagScaleX = o["diagScaleX"];
+    s.diagScaleY = o["diagScaleY"];
+    s.noiseSuppress = o["noiseSuppress"];
+    s.noiseX = o["noiseX"];
+    s.noiseY = o["noiseY"];
+    s.scaleUp = o["scaleUp"] | 100u;
+    s.scaleDown = o["scaleDown"] | 100u;
+    s.scaleLeft = o["scaleLeft"] | 100u;
+    s.scaleRight = o["scaleRight"] | 100u;
+    s.innerX = o["innerX"] | 0u;
+    s.innerY = o["innerY"] | 0u;
+    s.outerX = o["outerX"] | 100u;
+    s.outerY = o["outerY"] | 100u;
+    s.antiX = o["antiX"] | 0u;
+    s.antiY = o["antiY"] | 0u;
+    s.resolution = o["resolution"] | 0u;
+    s.delayMs = o["delayMs"] | 0u;
+    s.angleOffset100 = o["angleOffset100"] | 0;
+    s.angleSnap = o["angleSnap"] | 0u;
+    s.angleMapCount = o["angleMapCount"] | 0u;
+    s.angleMapEnable = o["angleMapEnable"] | 0u;
+    JsonArray ai = o["angleMapIn100"], ao = o["angleMapOut100"], ad = o["angleMapDz100"];
+    s.angleMapIn100_count = 0; s.angleMapOut100_count = 0; s.angleMapDz100_count = 0;
+    for (unsigned i = 0; i < ai.size() && i < 16; i++) { s.angleMapIn100[i] = ai[i]; s.angleMapIn100_count++; }
+    for (unsigned i = 0; i < ao.size() && i < 16; i++) { s.angleMapOut100[i] = ao[i]; s.angleMapOut100_count++; }
+    for (unsigned i = 0; i < ad.size() && i < 16; i++) { s.angleMapDz100[i] = ad[i]; s.angleMapDz100_count++; }
 }
 
 std::string getHMLAnalogOptions()
 {
-    DynamicJsonDocument doc(JSON_OBJECT_SIZE(200));
+    DynamicJsonDocument doc(16384); // two sticks x ~45 fields + angle map arrays
     HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     doc["enabled"] = opts.enabled;
     doc["chLX"] = opts.chLX; doc["chLY"] = opts.chLY;
@@ -2573,6 +2625,22 @@ std::string getHMLAnalogOptions()
     doc["rtAdcPin"] = opts.rtAdcPin;
     doc["l3Pin"] = opts.l3Pin;
     doc["r3Pin"] = opts.r3Pin;
+    doc["chL3"] = opts.chL3;
+    doc["l3Threshold"] = opts.l3Threshold;
+    doc["l3ActiveHigh"] = opts.l3ActiveHigh;
+    doc["chR3"] = opts.chR3;
+    doc["r3Threshold"] = opts.r3Threshold;
+    doc["r3ActiveHigh"] = opts.r3ActiveHigh;
+    // PS5 auth dongle needs the USB host peripheral; mirror it here so the
+    // HML page can toggle it without a trip to Peripheral Mapping
+    const PeripheralOptions& peripheralOptions = Storage::getInstance().getPeripheralOptions();
+    doc["usbHostEnabled"] = peripheralOptions.blockUSB0.enabled;
+    doc["usbHostDp"] = peripheralOptions.blockUSB0.dp;
+    // Dedicated lightbar (single WS2812 driven directly from the console color)
+    doc["lightbarEnabled"] = opts.lightbarEnabled;
+    doc["lightbarDataPin"] = opts.lightbarPin;
+    doc["lightbarBrightness"] = opts.lightbarBrightness;
+    doc["lightbarColor"] = opts.lightbarColor;
     hmlStickToJson(doc.createNestedObject("leftStick"), opts.leftStick);
     hmlStickToJson(doc.createNestedObject("rightStick"), opts.rightStick);
     return serialize_json(doc);
@@ -2592,6 +2660,35 @@ std::string setHMLAnalogOptions()
     opts.rtAdcPin = doc["rtAdcPin"];
     opts.l3Pin = doc["l3Pin"];
     opts.r3Pin = doc["r3Pin"];
+    opts.chL3 = doc["chL3"];
+    opts.l3Threshold = doc["l3Threshold"];
+    opts.l3ActiveHigh = doc["l3ActiveHigh"];
+    opts.chR3 = doc["chR3"];
+    opts.r3Threshold = doc["r3Threshold"];
+    opts.r3ActiveHigh = doc["r3ActiveHigh"];
+    if (doc.containsKey("usbHostEnabled")) {
+        PeripheralOptions& peripheralOptions = Storage::getInstance().getPeripheralOptions();
+        peripheralOptions.blockUSB0.enabled = doc["usbHostEnabled"];
+        int32_t dp = doc.containsKey("usbHostDp") ? doc["usbHostDp"].as<int32_t>() : peripheralOptions.blockUSB0.dp;
+        // Stock HML wiring: dongle port D+ on GPIO6 (D- on 7)
+        if (peripheralOptions.blockUSB0.enabled && !isValidPin(dp))
+            dp = 6;
+        peripheralOptions.blockUSB0.dp = dp;
+    }
+    opts.lightbarEnabled = doc["lightbarEnabled"];
+    opts.has_lightbarEnabled = true;
+    int32_t lbPin = doc.containsKey("lightbarDataPin") ? doc["lightbarDataPin"].as<int32_t>() : opts.lightbarPin;
+    if (opts.lightbarEnabled && !isValidPin(lbPin)) lbPin = 20; // HML default
+    opts.lightbarPin = lbPin;
+    opts.has_lightbarPin = true;
+    if (doc.containsKey("lightbarBrightness")) {
+        opts.lightbarBrightness = doc["lightbarBrightness"];
+        opts.has_lightbarBrightness = true;
+    }
+    if (doc.containsKey("lightbarColor")) {
+        opts.lightbarColor = doc["lightbarColor"];
+        opts.has_lightbarColor = true;
+    }
     hmlStickFromJson(doc["leftStick"], opts.leftStick);
     hmlStickFromJson(doc["rightStick"], opts.rightStick);
     opts.has_leftStick = true;
@@ -2634,6 +2731,20 @@ std::string getHMLAnalogRaw()
     return serialize_json(doc);
 }
 
+
+std::string getHMLNoiseSample()
+{
+    // Burst-sample the sticks at rest (~2000 reads) and report per-channel
+    // peak-to-peak noise, used as the stabilization gate band. Blocks the
+    // webconfig loop for well under a second.
+    DynamicJsonDocument doc(JSON_OBJECT_SIZE(40));
+    uint16_t mn[ADS8332_CHANNEL_COUNT], mx[ADS8332_CHANNEL_COUNT];
+    bool ok = HMLAnalogAddon::noiseSample(mn, mx, 2000);
+    doc["valid"] = ok;
+    JsonArray p2p = doc.createNestedArray("p2p");
+    for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) p2p.add(ok ? (uint16_t)(mx[i] - mn[i]) : 0);
+    return serialize_json(doc);
+}
 
 std::string setHMLMuxProbe()
 {
@@ -2942,6 +3053,7 @@ static const std::pair<const char*, HandlerFuncPtr> handlerFuncs[] =
     { "/api/getHMLAnalogOptions", getHMLAnalogOptions },
 	{ "/api/setHMLAnalogOptions", setHMLAnalogOptions },
 	{ "/api/getHMLAnalogRaw", getHMLAnalogRaw },
+	{ "/api/getHMLNoiseSample", getHMLNoiseSample },
 	{ "/api/setHMLMuxProbe", setHMLMuxProbe },
 	{ "/api/getHeldPins", getHeldPins },
     { "/api/abortGetHeldPins", abortGetHeldPins },

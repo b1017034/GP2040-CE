@@ -15,6 +15,9 @@
 
 #define DEFAULT_DEBOUNCE_DELAY 5
 
+// Request 1ms USB polling (1000Hz) out of the box; changeable in webconfig
+#define DEFAULT_USB_POLL_RATE 1000
+
 // Real pin mappings extracted from stock GNS firmware (v0.7.12-297 fork)
 #define GPIO_PIN_08 GpioAction::BUTTON_PRESS_DOWN
 #define GPIO_PIN_09 GpioAction::BUTTON_PRESS_B2
@@ -44,9 +47,15 @@
 // Analog triggers on RP2040 ADC (from stock firmware analysis)
 #define HML_ANALOG_LT_ADC_PIN 26
 #define HML_ANALOG_RT_ADC_PIN 28
-// Stick click switches (verified as SIO inputs w/ pull-up in stock firmware)
-#define HML_ANALOG_L3_PIN 24
-#define HML_ANALOG_R3_PIN 25
+// Stick clicks are ANALOG, on ADS8332 channels shared with other buttons via
+// resistor ladders (live-identified): ch3 = L3 (~16460 pressed, 65518 idle),
+// ch4 = R3 (~16400 pressed) shared with the SMD PS button (~29 pressed).
+#define HML_ANALOG_L3_PIN -1
+#define HML_ANALOG_R3_PIN -1
+#define HML_ANALOG_CH_L3 3
+#define HML_ANALOG_CH_R3 4
+// PS threshold must sit BELOW the R3 ladder level
+#define HML_ANALOG_PS_THRESHOLD_LADDER 8000
 
 // Trigger calibration: raw ADC counts at rest / fully pressed (pressed pulls low)
 #define HML_TRIGGER_LT_IDLE 4060
@@ -59,6 +68,25 @@
 // Boot combos: hold button while plugging in to select input mode
 // B2 (right face) = XInput, B4 (top face) = PS4, R2 = P5 General (PS5)
 #define DEFAULT_INPUT_MODE_R2 INPUT_MODE_P5GENERAL
+
+// USB host port for the PS5 auth dongle (VID 0x2B81 PID 0x0101), wiring taken
+// from stock GNS firmware defaults: D+ = GPIO6, D- = GPIO7, no 5V enable pin.
+// P5General mode signs every report through the dongle, so without this the
+// mode sends nothing at all.
+#define USB_PERIPHERAL_ENABLED 1
+#define USB_PERIPHERAL_PIN_DPLUS 6
+#define USB_PERIPHERAL_PIN_ORDER 0
+
+// Lightbar RGB LED = a single WS2812 on GPIO20 (from stock GNS firmware config
+// defaults: ledOptions.dataPin=20). We drive it through a dedicated HML path
+// (HMLAnalogAddon), NOT the generic NeoPico/player-LED addon, because that path
+// zeroes the lightbar via the player-LED level + animation-brightness gates and
+// its ws2812 lands on pio0/sm0 which the PS5 dongle's Pico-PIO-USB host already
+// claims for TX. The dedicated path uses pio1/sm1 (USB uses pio0/sm0 + pio1/sm0)
+// and reads the console-sent color straight out of auxState.statusLight.
+#define HML_LIGHTBAR_ENABLED true
+#define HML_LIGHTBAR_PIN 20
+#define HML_LIGHTBAR_BRIGHTNESS 128
 
 // Keyboard Mapping Configuration (required defaults)
 #define KEY_DPAD_UP     HID_KEY_ARROW_UP

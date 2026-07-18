@@ -13,6 +13,10 @@ import { AppContext } from '../Contexts/AppContext';
 import ContextualHelpOverlay from '../Components/ContextualHelpOverlay';
 import KeyboardMapper from '../Components/KeyboardMapper';
 import Section from '../Components/Section';
+import HMLLightbarControl from '../Components/HMLLightbarControl';
+import HMLDongleControl from '../Components/HMLDongleControl';
+import HMLDeviceControl from '../Components/HMLDeviceControl';
+import HMLAnalogPage from './HMLAnalogPage';
 import WebApi, { baseButtonMappings } from '../Services/WebApi';
 import { BUTTON_MASKS_OPTIONS, getButtonLabels } from '../Data/Buttons';
 
@@ -396,6 +400,11 @@ const schema = yup.object().shape({
 		.oneOf(AUTHENTICATION_TYPES.map((o) => o.value))
 		.label('X-Input Authentication Type'),
 	debounceDelay: yup.number().required().label('Debounce Delay'),
+	usbPollRate: yup
+		.number()
+		.required()
+		.oneOf([0, 125, 250, 500, 1000])
+		.label('USB Poll Rate'),
 	miniMenuGamepadInput: yup.number().required().label('Mini Menu'),
 	inputModeB1: yup
 		.number()
@@ -1453,6 +1462,21 @@ export default function SettingsPage() {
 													{t('SettingsPage:hotkey-settings-label')}
 												</Nav.Link>
 											</Nav.Item>
+											<Nav.Item>
+												<Nav.Link eventKey="hmllightbar">
+													ライトバーLED
+												</Nav.Link>
+											</Nav.Item>
+											<Nav.Item>
+												<Nav.Link eventKey="hmlanalog">
+													スティック設定
+												</Nav.Link>
+											</Nav.Item>
+											<Nav.Item>
+												<Nav.Link eventKey="hmldongle">
+													デバイス設定
+												</Nav.Link>
+											</Nav.Item>
 										</Nav>
 									</Col>
 									<Col md={9}>
@@ -1672,6 +1696,30 @@ export default function SettingsPage() {
 																min={0}
 																max={5000}
 															/>
+														</Col>
+													</Form.Group>
+													<Form.Group className="row mb-3">
+														<Form.Label>
+															{t('SettingsPage:usb-poll-rate-label')}
+														</Form.Label>
+														<Col sm={3}>
+															<Form.Select
+																name="usbPollRate"
+																className="form-select-sm"
+																value={values.usbPollRate}
+																onChange={(e) =>
+																	setFieldValue('usbPollRate', parseInt(e.target.value))
+																}
+																isInvalid={errors.usbPollRate}
+															>
+																<option value={0}>
+																	{t('SettingsPage:usb-poll-rate-default')}
+																</option>
+																<option value={125}>125 Hz (8 ms)</option>
+																<option value={250}>250 Hz (4 ms)</option>
+																<option value={500}>500 Hz (2 ms)</option>
+																<option value={1000}>1000 Hz (1 ms)</option>
+															</Form.Select>
 														</Col>
 													</Form.Group>
 													<Form.Group className="row mb-5">
@@ -1975,6 +2023,20 @@ export default function SettingsPage() {
 													{saveMessage ? (
 														<span className="alert">{saveMessage}</span>
 													) : null}
+												</Section>
+											</Tab.Pane>
+											<Tab.Pane eventKey="hmllightbar">
+												<Section title="ライトバーLED (HML)">
+													<HMLLightbarControl />
+												</Section>
+											</Tab.Pane>
+											<Tab.Pane eventKey="hmlanalog">
+												<HMLAnalogPage />
+											</Tab.Pane>
+											<Tab.Pane eventKey="hmldongle">
+												<HMLDeviceControl />
+												<Section title="PS5 (P5 General) 認証ドングル">
+													<HMLDongleControl />
 												</Section>
 											</Tab.Pane>
 										</Tab.Content>
