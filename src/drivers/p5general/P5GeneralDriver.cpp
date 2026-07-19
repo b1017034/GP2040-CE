@@ -102,25 +102,9 @@ bool P5GeneralDriver::getDongleAuthRequired() {
     return true;
 }
 
-// TEMP DIAG: per-second pipeline rates, exposed in the gyro fields (when the
-// gyro is disabled) so a PC-side WebHID page can read them out of the report.
-static uint32_t dbgLoopCount = 0, dbgQueueCount = 0, dbgSentCount = 0;
-static uint32_t dbgWindowStartMs = 0;
-static uint16_t dbgLoopHz = 0, dbgQueueHz = 0, dbgSentHz = 0;
-
 bool P5GeneralDriver::process(Gamepad * gamepad) {
     if (!p5GeneralAuthData || !p5GeneralAuthData->dongle_ready) {
         return false;
-    }
-
-    dbgLoopCount++;
-    uint32_t dbgNowMs = to_ms_since_boot(get_absolute_time());
-    if (dbgNowMs - dbgWindowStartMs >= 1000) {
-        dbgLoopHz = (uint16_t)MIN(dbgLoopCount, (uint32_t)0xFFFF);
-        dbgQueueHz = (uint16_t)MIN(dbgQueueCount, (uint32_t)0xFFFF);
-        dbgSentHz = (uint16_t)MIN(dbgSentCount, (uint32_t)0xFFFF);
-        dbgLoopCount = dbgQueueCount = dbgSentCount = 0;
-        dbgWindowStartMs = dbgNowMs;
     }
 
     if (tud_suspended()) {
@@ -131,7 +115,6 @@ bool P5GeneralDriver::process(Gamepad * gamepad) {
         if (tud_hid_ready() && tud_hid_report(0, p5GeneralAuthData->hash_finish_buffer, sizeof(p5GeneralAuthData->hash_finish_buffer)) == true ) {
             last_report_us = to_us_since_boot(get_absolute_time());
             p5GeneralAuthData->hash_ready = false;
-            dbgSentCount++;
         } else {
             return false;
         }
@@ -139,6 +122,20 @@ bool P5GeneralDriver::process(Gamepad * gamepad) {
 
     if (p5GeneralAuthData->hash_pending) {
         return false;
+    }
+
+    // Pause the signing pipeline while an auth passthrough transfer is in
+    // flight on the dongle: continuous signing traffic delays the console's
+    // auth challenge round-trip and the PS5 then never activates the
+    // controller (PC is unaffected because it never runs the challenge).
+    // The 500ms post-F0 delay state has nothing in flight, so keep streaming
+    // there; the remaining windows are single control transfers (a few ms).
+    {
+        P5GeneralGPAuthState st = p5GeneralAuthData->passthrough_state;
+        if (st != P5GeneralGPAuthState::p5g_auth_idle &&
+            st != P5GeneralGPAuthState::p5g_auth_recv_f2_delay_500mS) {
+            return false;
+        }
     }
 
     // update gamepad
@@ -188,10 +185,9 @@ bool P5GeneralDriver::process(Gamepad * gamepad) {
         p5GeneralReport.gyroscope.y = ((gamepad->auxState.sensors.gyroscope.y & 0xFF) << 8) | ((gamepad->auxState.sensors.gyroscope.y & 0xFF00) >> 8);
         p5GeneralReport.gyroscope.z = ((gamepad->auxState.sensors.gyroscope.z & 0xFF) << 8) | ((gamepad->auxState.sensors.gyroscope.z & 0xFF00) >> 8);
     } else {
-        // TEMP DIAG: loop/queue/sent rates (little-endian) for the WebHID tester
-        p5GeneralReport.gyroscope.x = dbgLoopHz;
-        p5GeneralReport.gyroscope.y = dbgQueueHz;
-        p5GeneralReport.gyroscope.z = dbgSentHz;
+        p5GeneralReport.gyroscope.x = 0;
+        p5GeneralReport.gyroscope.y = 0;
+        p5GeneralReport.gyroscope.z = 0;
     }
 
     // accelerometer
@@ -248,15 +244,22 @@ bool P5GeneralDriver::process(Gamepad * gamepad) {
     }
     p5GeneralReport.touchpad_data = touchpadData;
 
-    // Stream a report every frame instead of only on change: a real DualSense
-    // sends continuously, and the measured poll rate is the report rate. The
-    // dongle round-trip is pipelined (next report is queued to the dongle while
-    // the previous signed one is in flight), so this sustains the full rate.
-    memcpy(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport));
-    memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
-    p5GeneralAuthData->hash_pending = true;
-    dbgQueueCount++;
-    return true;
+    // v21 behavior (PS5-verified): queue for signing only when the report
+    // changed, then repeat it a few frames so the console latches it.
+    if (memcmp(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport))) {
+        memcpy(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport));
+        memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
+        p5GeneralAuthData->hash_pending = true;
+        diff_report_repeat = 4;
+        return true;
+    } else if (diff_report_repeat) {
+        diff_report_repeat--;
+        memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
+        p5GeneralAuthData->hash_pending = true;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 void P5GeneralDriver::processAux() {

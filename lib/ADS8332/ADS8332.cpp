@@ -6,7 +6,9 @@
 
 // CS pin candidates: the configured peripheral CS first, then every pin the
 // stock firmware marks ASSIGNED_TO_ADDON with no other known function.
-static const int8_t CS_CANDIDATES[] = { 1, 4, 5, 6, 7, 10, 11, 20, 24, 25 };
+// (20/24/25 removed: they are the lightbar / L3 / R3 pins on the HML board and
+// probing them corrupts those peripherals if the ADC link is slow to come up.)
+static const int8_t CS_CANDIDATES[] = { 1, 4, 5, 6, 7, 10, 11 };
 #define CS_CANDIDATE_COUNT (sizeof(CS_CANDIDATES) / sizeof(CS_CANDIDATES[0]))
 
 void ADS8332::setFormat(uint8_t mode) {
@@ -38,10 +40,13 @@ uint8_t ADS8332::burst(const uint16_t *tx, uint16_t *rx, uint8_t count) {
 
 void ADS8332::decode(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t &tag) const {
     if (stitch) {
-        // Sampled stream is one bit early: rx[0] = data<<1 | tag3, and the
-        // true data MSB was captured from the pad at CS assertion.
+        // Sampled stream is one bit early: rx[0] = data<<1 | T2 (tag MSB), and
+        // the true data MSB was captured from the pad at CS assertion. rx[1]
+        // then starts at T1, so its top two bits are T1,T0: the 3-bit tag is
+        // (rx0&1)<<2 | rx1>>14. (The old <<3 / >>13 form produced even-only
+        // 4-bit tags: every channel landed in bin 2n and ch4-7 were dropped.)
         value = (uint16_t)(msb << 15) | (rx[0] >> 1);
-        tag = (uint8_t)(((rx[0] & 1) << 3) | (rx[1] >> 13));
+        tag = (uint8_t)(((rx[0] & 1) << 2) | (rx[1] >> 14));
     } else {
         // word0 = 16-bit conversion result; word1 top 3 bits [15:13] = channel
         // TAG (bit12 is a trailing zero). Reading >>12 loses the tag LSB and
@@ -56,6 +61,11 @@ void ADS8332::decode(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t
 bool ADS8332::checkCfr(uint16_t cfrValue) {
     uint16_t rx[2];
     uint16_t cmd;
+    // Dummy frame first: a warm reboot can leave the chip mid-frame (it is not
+    // power-cycled with the MCU); the CS edges realign its serial interface
+    // before the commands below are interpreted.
+    cmd = ADS8332_CMD_READ_CFR;     burst(&cmd, rx, 1);
+    busy_wait_us(20);
     cmd = ADS8332_CMD_DEFAULT_MODE; burst(&cmd, rx, 1);
     busy_wait_us(20);
     cmd = ADS8332_CMD_WAKEUP;       burst(&cmd, rx, 1);
@@ -78,9 +88,52 @@ bool ADS8332::checkCfr(uint16_t cfrValue) {
     return false;
 }
 
+// The CFR readback only proves 16-bit command frames work; the 32-clock data
+// frames can still be bit-misaligned (wrong stitch detection after the bus
+// floated in BOOTSEL). Require a healthy TAG stream: nearly all tags in 0-7
+// and most channels visible within one sequencer sweep.
+bool ADS8332::checkData() {
+    uint16_t tx[2] = { ADS8332_CMD_READ_DATA, 0x0000 };
+    bool seen[ADS8332_CHANNEL_COUNT] = { false };
+    uint8_t good = 0, distinct = 0;
+    for (uint8_t i = 0; i < 32; i++) {
+        uint16_t rx[2];
+        uint8_t msb = burst(tx, rx, 2);
+        uint16_t value; uint8_t tag;
+        decode(msb, rx, value, tag);
+        if (tag < ADS8332_CHANNEL_COUNT) {
+            good++;
+            if (!seen[tag]) { seen[tag] = true; distinct++; }
+        }
+        busy_wait_us(4);
+    }
+    return good >= 24 && distinct >= 6;
+}
+
+bool ADS8332::validateLink() {
+    if (checkData()) return true;
+    stitch = !stitch; // CFR readback can mis-detect the 1-bit shift
+    if (checkData()) return true;
+    stitch = !stitch;
+    return false;
+}
+
 void ADS8332::init() {
     static const uint8_t order[4] = { 2, 3, 1, 0 };
     int8_t cfgCs = csPin;
+    linkOk = false;
+    scanCompleted = false;
+    memset(seqCounts, 0, sizeof(seqCounts));
+    seqAttempts = 0;
+
+    // Abort any frame left over from before a warm reboot: park CS high well
+    // past any conversion/frame timing before probing.
+    if (cfgCs >= 0) {
+        gpio_init(cfgCs);
+        gpio_set_dir(cfgCs, GPIO_OUT);
+        gpio_put(cfgCs, 1);
+        busy_wait_us(1000);
+    }
 
     // Strategy A (preferred): software CS on the configured pin with AUTO
     // channel sequencing + TAG bits. Each 32-clock frame self-identifies its
@@ -94,7 +147,7 @@ void ADS8332::init() {
         hwCs = false;
         for (uint8_t i = 0; i < 4; i++) {
             setFormat(order[i]);
-            if (checkCfr(ADS8332_CFR_AUTO_TAG)) {
+            if (checkCfr(ADS8332_CFR_AUTO_TAG) && validateLink()) {
                 probedMode = order[i];
                 probedCs = cfgCs;
                 linkOk = true;
@@ -132,7 +185,7 @@ void ADS8332::init() {
         csPin = pin;
         for (uint8_t i = 0; i < 4; i++) {
             setFormat(order[i]);
-            if (checkCfr(ADS8332_CFR_AUTO_TAG)) {
+            if (checkCfr(ADS8332_CFR_AUTO_TAG) && validateLink()) {
                 probedMode = order[i];
                 probedCs = pin;
                 linkOk = true;
@@ -162,6 +215,7 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
             uint16_t v = stitch ? (uint16_t)((msb << 15) | (rx[0] >> 1)) : rx[0];
             values[ch] = v;
         }
+        scanCompleted = true;
         return;
     }
 
@@ -191,10 +245,24 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
         done = true;
         for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
             if (seqCounts[i] < 3) { done = false; break; }
-        if (seqAttempts >= 48) done = true;
+        if (seqAttempts >= 48) {
+            // Bins never filled: the TAG stream is unhealthy. A few in a row
+            // means the data path is misaligned -> drop the link so the addon
+            // re-probes from scratch.
+            if (!done && ++cappedScans >= 3) {
+                linkOk = false;
+                scanCompleted = false;
+                cappedScans = 0;
+                memset(seqCounts, 0, sizeof(seqCounts));
+                seqAttempts = 0;
+                return;
+            }
+            done = true;
+        }
     }
     if (!done)
         return; // scan continues next call; values[] keeps previous data
+    cappedScans = 0;
 
     for (uint8_t ch = 0; ch < ADS8332_CHANNEL_COUNT; ch++) {
         uint8_t n = seqCounts[ch];
@@ -211,4 +279,5 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
     }
     memset(seqCounts, 0, sizeof(seqCounts));
     seqAttempts = 0;
+    scanCompleted = true;
 }

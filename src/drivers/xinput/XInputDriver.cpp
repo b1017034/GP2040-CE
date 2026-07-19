@@ -411,6 +411,23 @@ uint16_t XInputDriver::get_report(uint8_t report_id, hid_report_type_t report_ty
 
 // Only respond to vendor control xfers if we have a mounted x360 device
 bool XInputDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request) {
+    // MS OS 1.0 feature descriptor: Windows probes this (vendor code from the
+    // 0xEE string) and binds xusb22.sys to interface 0 via the XUSB10
+    // compatible ID. Must be handled regardless of the auth driver.
+    if (request->bmRequestType_bit.type == TUSB_REQ_TYPE_VENDOR &&
+        request->bmRequestType_bit.direction == TUSB_DIR_IN &&
+        request->bRequest == REQ_GET_OS_FEATURE_DESCRIPTOR) {
+        if (request->wIndex == DESC_EXTENDED_COMPATIBLE_ID_DESCRIPTOR) {
+            if (stage == CONTROL_STAGE_SETUP) {
+                tud_control_xfer(rhport, request,
+                                 (void *)xinput_ms_compat_id_descriptor,
+                                 sizeof(xinput_ms_compat_id_descriptor));
+            }
+            return true;
+        }
+        return false; // no extended properties (0x0005) -> stall
+    }
+
   // Do nothing if we have no auth driver
     if ( xAuthDriver == nullptr || !xAuthDriver->available() ) {
         return false;
@@ -489,6 +506,15 @@ bool XInputDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_co
 
 const uint16_t * XInputDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
     char *value;
+    // MS OS string descriptor: "MSFT100" + vendor code. 0x20 doubles as an
+    // ASCII space, so the plain string helper emits the exact byte layout
+    // (bMS_VendorCode = 0x20, bPad = 0x00).
+    if (index == 0xEE) {
+        return getStringDescriptor("MSFT100\x20", index);
+    }
+    if (index >= sizeof(xinput_string_descriptors) / sizeof(xinput_string_descriptors[0])) {
+        return nullptr;
+    }
     // Check for override settings
     GamepadOptions & gamepadOptions = Storage::getInstance().getGamepadOptions();
     if ( gamepadOptions.usbDescOverride == true ) {

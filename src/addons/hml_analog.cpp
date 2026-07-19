@@ -63,14 +63,17 @@ void HMLAnalogAddon::setup() {
 
 // One WS2812 lightbar showing a fixed user-configured color. This avoids the
 // generic NeoPico/player-LED path, whose animation-brightness and per-player
-// level gates zero the pixel, and whose ws2812 lands on pio0/sm0 (claimed by the
-// PS5 dongle's Pico-PIO-USB TX). We run on pio1/sm1: USB uses pio0/sm0 + pio1/sm0.
+// level gates zero the pixel.
+// PIO placement: Pico-PIO-USB (PS5 dongle host) uses pio0/sm0 for TX and
+// pio1/sm0 (RX) + pio1/sm1 (EOP detect). Claiming pio1/sm1 kills the host's
+// EOP state machine - the dongle then never authenticates and the PS5 drops
+// the controller - so the lightbar lives on pio0/sm1 instead.
 void HMLAnalogAddon::lightbarSetup() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     if (!opts.lightbarEnabled || opts.lightbarPin < 0 || opts.lightbarPin >= 30)
         return;
     lightbar = new NeoPico();
-    lightbar->Setup(opts.lightbarPin, 1, LED_FORMAT_GRB, pio1, 1);
+    lightbar->Setup(opts.lightbarPin, 1, LED_FORMAT_GRB, pio0, 1);
     lightbar->Off(); // start dark
 }
 
@@ -98,8 +101,12 @@ void HMLAnalogAddon::lightbarUpdate() {
     g = (uint8_t)((uint16_t)g * br / 255);
     b = (uint8_t)((uint16_t)b * br / 255);
     uint32_t grb = ((uint32_t)g << 16) | ((uint32_t)r << 8) | (uint32_t)b;
-    if (grb != lightbarLastColor) {
+    // Rewrite periodically even when unchanged: electrical noise (e.g. warm
+    // reboot glitching the data line) can corrupt the strip's latched color
+    bool force = (int32_t)(now - lightbarForceMs) >= 0;
+    if (grb != lightbarLastColor || force) {
         lightbarLastColor = grb;
+        lightbarForceMs = now + 500;
         // SetFrame copies a full 100-pixel array; only pixel 0 is shown (count=1)
         uint32_t buf[100] = {0};
         buf[0] = grb;
@@ -458,6 +465,17 @@ void HMLAnalogAddon::preprocess() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     if (ads == nullptr) return;
 
+    // Self-heal: after a warm reboot the ADC may still be desynced when the
+    // first probe runs; keep retrying the link until it comes up.
+    if (!ads->linkOk) {
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if ((int32_t)(now - adsRetryMs) >= 0) {
+            adsRetryMs = now + 500;
+            ads->init();
+        }
+        if (!ads->linkOk) return; // sticks stay centered until the link is up
+    }
+
     ads->readAll(rawChannels);
     if (adcInitialized) {
         if (opts.ltAdcPin >= 26 && opts.ltAdcPin <= 29) {
@@ -469,7 +487,9 @@ void HMLAnalogAddon::preprocess() {
             rawAdc[1] = adc_read();
         }
     }
-    rawValid = true;
+    // Only report valid once a complete scan has run: otherwise the zeroed
+    // buffer reads as full deflection (stick pinned to a corner) after boot
+    rawValid = ads->scanCompleted;
 
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
 
@@ -507,11 +527,16 @@ void HMLAnalogAddon::preprocess() {
 // Firebird-style stabilization: backlash gate on raw counts. The held value
 // only moves when the input leaves a band the size of the measured at-rest
 // noise, so a stationary stick produces a bit-identical output every frame.
+// FireBird 動作の安定化: 静止中 (ノイズ幅以内の変動) は直前の値をホールドし、
+// ノイズ幅を超えて動いたら生値へ完全追従する。追従型 (raw±band を返す) にする
+// と中央・最大値が常に band ぶんズレるので不可。
 static uint16_t gateAxis(uint16_t raw, uint16_t& held, uint32_t band) {
     if (band == 0) { held = raw; return raw; }
+    // 静止時ジッターの抑制が目的なのでバンドはフルスケール5%まで: 計測異常で
+    // 巨大な値が保存されても軸が凍らないようにする
+    if (band > 3276) band = 3276;
     int32_t d = (int32_t)raw - (int32_t)held;
-    if (d > (int32_t)band) held = (uint16_t)(raw - band);
-    else if (d < -(int32_t)band) held = (uint16_t)(raw + band);
+    if (d > (int32_t)band || d < -(int32_t)band) held = raw;
     return held;
 }
 

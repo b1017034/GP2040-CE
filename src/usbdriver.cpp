@@ -11,6 +11,7 @@
 #include "tusb.h"
 #include "drivermanager.h"
 #include "storagemanager.h"
+#include "drivers/shared/HMLConfigChannel.h"
 
 static bool usb_mounted;
 static bool usb_suspended;
@@ -29,12 +30,20 @@ const usbd_class_driver_t *usbd_app_driver_get_cb(uint8_t *driver_count) {
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen) {
+	// Real-time HML config channel: handled here so it works identically in
+	// every input mode (dedicated interface or in-interface feature reports)
+	if (report_type == HID_REPORT_TYPE_FEATURE && report_id == HMLConfigChannel::REPORT_GET)
+		return HMLConfigChannel::handleGet(buffer, reqlen);
 	return DriverManager::getInstance().getDriver()->get_report(report_id, report_type, buffer, reqlen);
 }
 
 // Invoked when received SET_REPORT control request or
 // received data on OUT endpoint ( Report ID = 0, Type = 0 )
 void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t const *buffer, uint16_t bufsize) {
+	if (report_type == HID_REPORT_TYPE_FEATURE && report_id == HMLConfigChannel::REPORT_SET) {
+		HMLConfigChannel::handleSet(buffer, bufsize);
+		return;
+	}
 	DriverManager::getInstance().getDriver()->set_report(report_id, report_type, buffer, bufsize);
 }
 
@@ -88,6 +97,8 @@ uint8_t const *tud_descriptor_device_cb() {
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
+	if (HMLConfigChannel::isInterfaceEnabled() && itf == HMLConfigChannel::getHidInstance())
+		return HMLConfigChannel::hml_config_report_descriptor;
 	return DriverManager::getInstance().getDriver()->get_hid_descriptor_report_cb(itf);
 }
 
@@ -98,6 +109,11 @@ static uint8_t const *applyUsbPollRate(uint8_t const *desc) {
 	static uint8_t patchedDesc[256];
 
 	if (desc == nullptr || DriverManager::getInstance().isConfigMode())
+		return desc;
+
+	// P5General must present the byte-exact stock GNS dongle descriptor to the
+	// PS5 - no bInterval patching in that mode
+	if (DriverManager::getInstance().getInputMode() == INPUT_MODE_P5GENERAL)
 		return desc;
 
 	uint32_t pollRateHz = Storage::getInstance().getGamepadOptions().usbPollRate;
@@ -135,11 +151,29 @@ static uint8_t const *applyUsbPollRate(uint8_t const *desc) {
 	return patchedDesc;
 }
 
+// The dedicated HML config interface rides along in every mode except the
+// ones below: web-config has its own channel, P5General must present the
+// exact GNS dongle descriptor to the PS5 (it carries the config channel
+// inside its main interface instead), and the Xbox drivers negotiate MS OS
+// 2.0 descriptors the console checks strictly.
+static bool hmlConfigItfAllowed() {
+	if (DriverManager::getInstance().isConfigMode())
+		return false;
+	InputMode mode = DriverManager::getInstance().getInputMode();
+	return mode != INPUT_MODE_P5GENERAL &&
+	       mode != INPUT_MODE_XBONE &&
+	       mode != INPUT_MODE_XBOXORIGINAL;
+}
+
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
-	return applyUsbPollRate(DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index));
+	uint8_t const *desc = applyUsbPollRate(DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index));
+	if (hmlConfigItfAllowed())
+		return HMLConfigChannel::patchConfigDescriptor(desc);
+	HMLConfigChannel::disableInterface();
+	return desc;
 }
 
 uint8_t const* tud_descriptor_device_qualifier_cb() {

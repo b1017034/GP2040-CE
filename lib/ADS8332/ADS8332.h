@@ -53,6 +53,7 @@ public:
 
     // Diagnostics (exposed via webconfig)
     bool linkOk = false;        // CFR readback succeeded during probe
+    bool scanCompleted = false; // at least one full 8-channel scan finished
     uint8_t probedMode = 0xFF;  // winning SPI mode (0-3)
     int8_t probedCs = -1;       // winning CS pin
     bool hwCs = false;          // PL022 hardware CS in use
@@ -68,6 +69,11 @@ private:
     uint8_t burst(const uint16_t *tx, uint16_t *rx, uint8_t count);
     void decode(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t &tag) const;
     bool checkCfr(uint16_t cfrValue);
+    // Read a batch of auto-sequence frames and verify the TAG stream is sane
+    // (CFR readback can pass while the data path is bit-misaligned)
+    bool checkData();
+    // checkData with automatic stitch-flip retry
+    bool validateLink();
 
     PeripheralSPI *spi;
     int8_t csPin;
@@ -77,6 +83,9 @@ private:
     uint16_t seqSamples[ADS8332_CHANNEL_COUNT][5];
     uint8_t seqCounts[ADS8332_CHANNEL_COUNT] = {0};
     uint8_t seqAttempts = 0;
+    // Runtime health: consecutive scans that hit the attempt cap without
+    // filling the bins (TAG stream broken) -> drop the link and re-probe
+    uint8_t cappedScans = 0;
 };
 
 #endif

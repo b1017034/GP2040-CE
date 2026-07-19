@@ -78,6 +78,9 @@ private:
     HMLStickState rightState;
     bool adcInitialized = false;
     uint32_t lastMicros = 0;
+    // Self-heal: retry ADC link bring-up (a warm reboot can leave the chip
+    // desynced and the first probe may fail)
+    uint32_t adsRetryMs = 0;
 
     // Dedicated single-WS2812 lightbar driven from the console-sent color
     void lightbarSetup();
@@ -85,6 +88,7 @@ private:
     NeoPico *lightbar = nullptr;
     uint32_t lightbarLastColor = 0xFFFFFFFF; // force first write
     uint32_t lightbarNextMs = 0;
+    uint32_t lightbarForceMs = 0; // periodic rewrite even when unchanged
 };
 
 #endif

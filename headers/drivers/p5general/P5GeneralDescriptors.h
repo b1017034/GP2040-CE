@@ -220,6 +220,10 @@ static const uint8_t p5general_report_descriptor[] =
     0x95, 0x0F,        //   Report Count (15)
     0xB1, 0x02,        //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
     0xC0,              // End Collection
+    // NOTE: no HML config channel here. The PS5 rejects the controller if this
+    // descriptor deviates from the stock GNS dongle (verified: appending the
+    // vendor TLC broke console detection). Real-time tuning is done in the
+    // other input modes; the settings storage is shared across modes.
 };
 
 static const uint8_t p5general_hid_descriptor[] =
@@ -230,7 +234,9 @@ static const uint8_t p5general_hid_descriptor[] =
     0x00,        //   bCountryCode
     0x01,        //   bNumDescriptors
     0x22,        //   bDescriptorType[0] (HID)
-    0xA5, 0x00,  //   wDescriptorLength[0] 165
+    // wDescriptorLength[0]
+    (uint8_t)(sizeof(p5general_report_descriptor) & 0xFF),
+    (uint8_t)((sizeof(p5general_report_descriptor) >> 8) & 0xFF),
 };
 
 static const uint8_t p5general_configuration_descriptor[] =
@@ -260,7 +266,9 @@ static const uint8_t p5general_configuration_descriptor[] =
     0x00,        //   bCountryCode
     0x01,        //   bNumDescriptors
     0x22,        //   bDescriptorType[0] (HID)
-    0xA5, 0x00,  //   wDescriptorLength[0] 165
+    // wDescriptorLength[0]
+    (uint8_t)(sizeof(p5general_report_descriptor) & 0xFF),
+    (uint8_t)((sizeof(p5general_report_descriptor) >> 8) & 0xFF),
 
     0x07,        //   bLength
     0x05,        //   bDescriptorType (Endpoint)

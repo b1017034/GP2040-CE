@@ -5,7 +5,6 @@
 #include "CRC32.h"
 #include "peripheralmanager.h"
 #include "usbhostmanager.h"
-#include "interval_override.h"
 
 #include <iostream>
 
@@ -36,7 +35,12 @@ void P5GeneralAuthUSBListener::process() {
     if ( p5GeneralAuthData == nullptr )
         return;
 
-    if (p5GeneralAuthData->hash_pending && tuh_hid_send_ready(ps_dev_addr, ps_instance)) {
+    // Do not feed the dongle signing work while an auth passthrough transfer
+    // is outstanding on its EP0 (the dongle services one thing at a time; a
+    // delayed auth response makes the PS5 drop the controller).
+    bool authBusy = p5GeneralAuthData->passthrough_state != P5GeneralGPAuthState::p5g_auth_idle &&
+                    p5GeneralAuthData->passthrough_state != P5GeneralGPAuthState::p5g_auth_recv_f2_delay_500mS;
+    if (!authBusy && p5GeneralAuthData->hash_pending && tuh_hid_send_ready(ps_dev_addr, ps_instance)) {
         tuh_hid_send_report(ps_dev_addr, ps_instance, 0, p5GeneralAuthData->hash_pending_buffer, 64);
         p5GeneralAuthData->hash_pending = false;
     }
@@ -97,9 +101,6 @@ void P5GeneralAuthUSBListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t
         ps_dev_addr = dev_addr;
         ps_instance = instance;
         p5GeneralAuthData->dongle_ready = true;
-        // The dongle advertises a slow bInterval; poll it every 1ms frame so the
-        // report round-trip (and thus the PS5-side poll rate) isn't capped by it.
-        interval_override = 1;
     }
 }
 
@@ -114,7 +115,6 @@ void P5GeneralAuthUSBListener::unmount(uint8_t dev_addr) {
     ps_instance = 0xFF;
     resetHostData();
     p5GeneralAuthData->dongle_ready = false;
-    interval_override = 0;
 }
 
 void P5GeneralAuthUSBListener::report_received(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {

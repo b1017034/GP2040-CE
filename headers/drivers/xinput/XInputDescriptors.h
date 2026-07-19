@@ -67,8 +67,8 @@ typedef enum {
 
 static const uint8_t xinput_string_language[]    = { 0x09, 0x04 };
 static const uint8_t xinput_string_serial[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-static const uint8_t xinput_string_manfacturer[] = "\xa9Microsoft Corporation";
-static const uint8_t xinput_string_product[]     = "Controller";
+static const uint8_t xinput_string_manfacturer[] = "WSK";
+static const uint8_t xinput_string_product[]     = "BirdStrike";
 static uint8_t xinput_string_version[]     = "08FEC93"; // Serial that is overridden by Pico ID
 static const uint8_t xinput_string_xsm3[]        = "Xbox Security Method 3, Version 1.00, \xa9 2005 Microsoft Corporation. All rights reserved.";
 
@@ -94,17 +94,25 @@ static const uint8_t * xinput_get_string_descriptor(int index) {
     return xinput_string_descriptors[index];
 }
 
+// Third-party-XInput identity (Flydigi/8BitDo style) instead of a byte-exact
+// Xbox 360 pad clone: composite device class + a PID Windows has no device-
+// level INF for, so usbccgp splits the interfaces and binds xusb22.sys to
+// interface 0 via the MS OS "XUSB10" compatible ID. This is what lets the
+// HML config HID interface surface on Windows next to a working XInput
+// function. VID stays 0x045E so Linux xpad still matches (it accepts any
+// 0x045E device carrying an FF/5D/01 interface). Real Xbox 360 console
+// support is dropped in exchange (no security interface, unknown PID).
 static const uint8_t xinput_device_descriptor[] =
 {
     0x12,       // bLength
     0x01,       // bDescriptorType (Device)
     0x00, 0x02, // bcdUSB 2.00
-    0xFF,          // bDeviceClass
-    0xFF,          // bDeviceSubClass
-    0xFF,          // bDeviceProtocol
+    0x00,          // bDeviceClass (composite, per-interface)
+    0x00,          // bDeviceSubClass
+    0x00,          // bDeviceProtocol
     0x40,          // bMaxPacketSize0 64
     0x5E, 0x04, // idVendor 0x045E
-    0x8E, 0x02, // idProduct 0x028E
+    0x58, 0x48, // idProduct 0x4858
     0x14, 0x01, // bcdDevice 2.14
     0x01,       // iManufacturer (String Index)
     0x02,       // iProduct (String Index)
@@ -112,15 +120,38 @@ static const uint8_t xinput_device_descriptor[] =
     0x01,       // bNumConfigurations 1
 };
 
-// This needs to be:
- // 4 interfaces
- // remote wakeup enabled
+// MS OS 1.0 Extended Compat ID: function 0 -> XUSB10 (binds xusb22.sys),
+// function 1 (the appended HML config HID interface) -> none (binds by class)
+static const uint8_t xinput_ms_compat_id_descriptor[] =
+{
+    0x40, 0x00, 0x00, 0x00, // dwLength 64
+    0x00, 0x01,             // bcdVersion 1.00
+    0x04, 0x00,             // wIndex (Extended Compat ID)
+    0x02,                   // bCount 2
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // reserved
+    // Function 0: XInput control interface
+    0x00,                   // bFirstInterfaceNumber
+    0x01,                   // reserved
+    'X', 'U', 'S', 'B', '1', '0', 0x00, 0x00, // compatibleID
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // subCompatibleID
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // reserved
+    // Function 1: HML config HID interface (no compat ID)
+    0x01,                   // bFirstInterfaceNumber
+    0x01,                   // reserved
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+// XInput control interface only (audio/plugin/security interfaces are Xbox
+// 360 console machinery — dropped with the third-party identity). The HML
+// config HID interface is appended at runtime in usbdriver.cpp.
 static const uint8_t xinput_configuration_descriptor[] =
 {
     0x09,        // bLength
     0x02,        // bDescriptorType (Configuration)
-    0x99, 0x00,  // wTotalLength 0x99
-    0x04,        // bNumInterfaces 4
+    0x31, 0x00,  // wTotalLength 49
+    0x01,        // bNumInterfaces 1
     0x01,        // bConfigurationValue
     0x00,        // iConfiguration (String Index)
     0xA0,        // bmAttributes (remote wakeup)
@@ -165,126 +196,6 @@ static const uint8_t xinput_configuration_descriptor[] =
     0x03,        // bmAttributes (Interrupt)
     0x20, 0x00,  // wMaxPacketSize 32
     0x08,        // bInterval 8 (unit depends on device speed)
-
-    // Interface Audio
-    0x09,        // bLength
-    0x04,        // bDescriptorType (Interface)
-    0x01,        // bInterfaceNumber 1
-    0x00,        // bAlternateSetting
-    0x04,        // bNumEndpoints 4
-    0xFF,        // bInterfaceClass
-    0x5D,        // bInterfaceSubClass
-    0x03,        // bInterfaceProtocol
-    0x00,        // iInterface (String Index)
-
-    // Audio Descriptor
-    0x1B,        // bLength
-    0x21,
-    0x00,
-    0x01,
-    0x01,
-    0x01,
-    0x83,        // XINPUT_MIC_IN
-    0x40,        // ??
-    0x01,        // ??
-    0x04,        // XINPUT_AUDIO_OUT
-    0x20,        // ??
-    0x16,        // ??
-    0x85,        // XINPUT_UNK_IN
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x16,
-    0x06,        // XINPUT_UNK_OUT
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-
-    // Report IN Endpoint 2.1
-    0x07,        // bLength
-    0x05,        // bDescriptorType (Endpoint)
-    0x83,        // bEndpointAddress (XINPUT_MIC_IN)
-    0x03,        // bmAttributes (Interrupt)
-    0x20, 0x00,  // wMaxPacketSize 32
-    0x02,        // bInterval 2 (unit depends on device speed)
-
-    // Report OUT Endpoint 2.2
-    0x07,        // bLength
-    0x05,        // bDescriptorType (Endpoint)
-    0x04,        // bEndpointAddress (XINPUT_AUDIO_OUT)
-    0x03,        // bmAttributes (Interrupt)
-    0x20, 0x00,  // wMaxPacketSize 32
-    0x04,        // bInterval 4 (unit depends on device speed)
-
-    // Report IN Endpoint 2.3
-    0x07,        // bLength
-    0x05,        // bDescriptorType (Endpoint)
-    0x85,        // bEndpointAddress (XINPUT_UNK_IN)
-    0x03,        // bmAttributes (Interrupt)
-    0x20, 0x00,  // wMaxPacketSize 32
-    0x40,        // bInterval 128
-
-    // Report OUT Endpoint 2.4
-    0x07,        // bLength
-    0x05,        // bDescriptorType (Endpoint)
-    0x06,        // bEndpointAddress (XINPUT_UNK_OUT)
-    0x03,        // bmAttributes (Interrupt)
-    0x20, 0x00,  // wMaxPacketSize 32
-    0x10,        // bInterval 16
-
-    // Interface Plugin Module
-    0x09,        // bLength
-    0x04,        // bDescriptorType (Interface)
-    0x02,        // bInterfaceNumber 2
-    0x00,        // bAlternateSetting
-    0x01,        // bNumEndpoints 1
-    0xFF,        // bInterfaceClass
-    0x5D,        // bInterfaceSubClass
-    0x02,        // bInterfaceProtocol
-    0x00,        // iInterface (String Index)
-
-    //PluginModuleDescriptor : {
-    0x09,        // bLength
-    0x21,        // bDescriptorType
-    0x00, 0x01,  // version 1.00
-    0x01,        // ??
-    0x22,        // ??
-    0x86,        // XINPUT_PLUGIN_MODULE_IN,
-    0x03,        // ??
-    0x00,        // ??
-
-    // Report IN Endpoint 3.1
-    0x07,        // bLength
-    0x05,        // bDescriptorType (Endpoint)
-    0x86,        // bEndpointAddress (XINPUT_PLUGIN_MODULE_IN)
-    0x03,        // bmAttributes (Interrupt)
-    0x20, 0x00,  // wMaxPacketSize 32
-    0x10,        // bInterval 8 (unit depends on device speed)
-
-    // Interface Security
-    0x09,        // bLength
-    0x04,        // bDescriptorType (Interface)
-    0x03,        // bInterfaceNumber 3
-    0x00,        // bAlternateSetting
-    0x00,        // bNumEndpoints 0
-    0xFF,        // bInterfaceClass
-    0xFD,        // bInterfaceSubClass
-    0x13,        // bInterfaceProtocol
-    0x04,        // iInterface (String Index)
-
-    // SecurityDescriptor (XSM3)
-    0x06,        // bLength
-    0x41,        // bDescriptType (Xbox 360)
-    0x00,
-    0x01,
-    0x01,
-    0x03,
 };
 
 typedef enum
