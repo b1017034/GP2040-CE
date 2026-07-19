@@ -92,6 +92,10 @@ static const ParamDef globalParams[] = {
     P_SCALAR(HMLAnalogOptions, 21, lightbarEnabled, PK_BOOL),
     P_SCALAR(HMLAnalogOptions, 23, lightbarBrightness, PK_U32),
     P_SCALAR(HMLAnalogOptions, 24, lightbarColor, PK_U32),
+    P_SCALAR(HMLAnalogOptions, 25, comboModeB1, PK_I32),
+    P_SCALAR(HMLAnalogOptions, 26, comboModeB2, PK_I32),
+    P_SCALAR(HMLAnalogOptions, 27, comboModeB3, PK_I32),
+    P_SCALAR(HMLAnalogOptions, 28, comboModeB4, PK_I32),
 };
 
 // target 0/1/2 -> (base pointer, table, table size); returns false if invalid

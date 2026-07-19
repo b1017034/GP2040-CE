@@ -32,6 +32,37 @@ function InputModeCard() {
 	);
 }
 
+// Share+Options+ボタン長押しのモード切替コンボ割り当て (ch v3+)
+function ModeComboCard() {
+	useConfig();
+	if (bs.protocolVersion < 3) return null;
+	const rows: [string, number][] = [
+		['× (クロス)', GP.comboModeB1],
+		['〇 (サークル)', GP.comboModeB2],
+		['□ (スクエア)', GP.comboModeB3],
+		['△ (トライアングル)', GP.comboModeB4],
+	];
+	return (
+		<div className="card">
+			<h3>モード切替コンボ（Share + Options + ボタン 長押し）</h3>
+			{rows.map(([label, id]) => (
+				<div className="row" key={id}>
+					<label>{label}</label>
+					<select value={bs.getVal(2, id)}
+						onChange={(e) => bs.setParam(2, id, 0, +e.target.value)}>
+						<option value={-1}>無効</option>
+						{INPUT_MODES.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
+					</select>
+				</div>
+			))}
+			<div className="note">
+				ボタンを離した状態から Share+Options+対象ボタン を4秒間押し続けると、
+				割り当てたモードを保存して再起動します。割り当て変更後は「本体に保存」を忘れずに。
+			</div>
+		</div>
+	);
+}
+
 function AdsDiagCard() {
 	useLive();
 	const d = bs.live.diag;
@@ -68,6 +99,7 @@ export function SystemPage() {
 	return (
 		<div>
 			<InputModeCard />
+			<ModeComboCard />
 			<div className="card">
 				<h3>ライトバー</h3>
 				<CheckRow t={2} id={GP.lightbarEnabled} label="有効" />

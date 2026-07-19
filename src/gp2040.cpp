@@ -511,17 +511,36 @@ void GP2040::RebootHotkeys::process(Gamepad* gamepad, bool configMode) {
 			noButtonsPressedTimeout = nil_time;
 		}
 	} else {
-		if (gamepad->state.buttons == webConfigHotkeyMask || gamepad->state.buttons == bootselHotkeyMask) {
+		// Share+Options+face-button: switch input mode (assignments come from
+		// config so the BirdStrike tool can remap them; -1 disables a combo)
+		const HMLAnalogOptions& hml = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+		const uint16_t comboBase = GAMEPAD_MASK_S1 | GAMEPAD_MASK_S2;
+		uint16_t btn = gamepad->state.buttons;
+		int32_t comboMode = -1;
+		if      (btn == (comboBase | GAMEPAD_MASK_B1)) comboMode = hml.comboModeB1;
+		else if (btn == (comboBase | GAMEPAD_MASK_B2)) comboMode = hml.comboModeB2;
+		else if (btn == (comboBase | GAMEPAD_MASK_B3)) comboMode = hml.comboModeB3;
+		else if (btn == (comboBase | GAMEPAD_MASK_B4)) comboMode = hml.comboModeB4;
+		bool comboActive = !configMode && comboMode >= 0 && comboMode <= INPUT_MODE_P5GENERAL;
+
+		if (btn == webConfigHotkeyMask || btn == bootselHotkeyMask || comboActive) {
 			if (is_nil_time(rebootHotkeysHoldTimeout)) {
 				rebootHotkeysHoldTimeout = make_timeout_time_ms(REBOOT_HOTKEY_HOLD_TIME_MS);
 			}
 
 			if (time_reached(rebootHotkeysHoldTimeout)) {
-				if (gamepad->state.buttons == webConfigHotkeyMask) {
+				if (btn == webConfigHotkeyMask) {
 					// If we are in webconfig mode we go to gamepad mode and vice versa
 					System::reboot(configMode ? System::BootMode::GAMEPAD : System::BootMode::WEBCONFIG);
-				} else if (gamepad->state.buttons == bootselHotkeyMask) {
+				} else if (btn == bootselHotkeyMask) {
 					System::reboot(System::BootMode::USB);
+				} else if (comboActive) {
+					GamepadOptions& gamepadOptions = Storage::getInstance().getGamepadOptions();
+					if (gamepadOptions.inputMode != (InputMode)comboMode) {
+						gamepadOptions.inputMode = (InputMode)comboMode;
+						Storage::getInstance().save(true);
+					}
+					System::reboot(System::BootMode::GAMEPAD);
 				}
 			}
 		} else {

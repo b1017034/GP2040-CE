@@ -45,6 +45,7 @@ export const GP = {
 	psThreshold: 7, psActiveHigh: 8, l3Threshold: 16, l3ActiveHigh: 17,
 	r3Threshold: 19, r3ActiveHigh: 20, lightbarEnabled: 21,
 	lightbarBrightness: 23, lightbarColor: 24,
+	comboModeB1: 25, comboModeB2: 26, comboModeB3: 27, comboModeB4: 28,
 } as const;
 
 export const CURVE_PRESETS: Record<number, { label: string; pts: number[][] }> = {

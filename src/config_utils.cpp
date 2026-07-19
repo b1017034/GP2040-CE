@@ -1184,6 +1184,12 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarPin, HML_LIGHTBAR_PIN);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarBrightness, HML_LIGHTBAR_BRIGHTNESS);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarColor, HML_LIGHTBAR_COLOR);
+    // Share+Options+face-button mode combos: x=XInput, o=PS5(GNS), square=PS4,
+    // triangle=Switch
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB1, INPUT_MODE_XINPUT);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB2, INPUT_MODE_P5GENERAL);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB3, INPUT_MODE_PS4);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB4, INPUT_MODE_SWITCH);
     for (auto* stick : { &config.addonOptions.hmlAnalogOptions.leftStick,
                          &config.addonOptions.hmlAnalogOptions.rightStick }) {
         INIT_UNSET_PROPERTY((*stick), calMinX, 0);

@@ -1044,6 +1044,12 @@ message HMLAnalogOptions
     // Idle/override color (0xRRGGBB) shown when the console isn't driving the
     // lightbar (and live in web-config); console color takes priority in-game.
     optional uint32 lightbarColor = 24;
+    // Share+Options+face-button input-mode switch combos: InputMode enum value
+    // per button, -1 = combo disabled. Hold REBOOT_HOTKEY_HOLD_TIME_MS to fire.
+    optional int32 comboModeB1 = 25;  // × (south)
+    optional int32 comboModeB2 = 26;  // 〇 (east)
+    optional int32 comboModeB3 = 27;  // □ (west)
+    optional int32 comboModeB4 = 28;  // △ (north)
 }
 
 message MigrationHistory

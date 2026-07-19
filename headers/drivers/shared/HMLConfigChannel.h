@@ -34,7 +34,8 @@ namespace HMLConfigChannel {
 constexpr uint8_t REPORT_SET = 0x60;
 constexpr uint8_t REPORT_GET = 0x61;
 // v2: REBOOT / SET_INPUT_MODE commands, INFO carries current input mode
-constexpr uint8_t PROTOCOL_VERSION = 2;
+// v3: comboModeB1-B4 global params (Share+Options+face-button mode switch)
+constexpr uint8_t PROTOCOL_VERSION = 3;
 
 // Handle a SET_REPORT (feature) with report id REPORT_SET
 void handleSet(const uint8_t *buffer, uint16_t bufsize);
