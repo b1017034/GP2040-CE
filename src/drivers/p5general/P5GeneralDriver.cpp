@@ -244,22 +244,15 @@ bool P5GeneralDriver::process(Gamepad * gamepad) {
     }
     p5GeneralReport.touchpad_data = touchpadData;
 
-    // v21 behavior (PS5-verified): queue for signing only when the report
-    // changed, then repeat it a few frames so the console latches it.
-    if (memcmp(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport))) {
-        memcpy(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport));
-        memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
-        p5GeneralAuthData->hash_pending = true;
-        diff_report_repeat = 4;
-        return true;
-    } else if (diff_report_repeat) {
-        diff_report_repeat--;
-        memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
-        p5GeneralAuthData->hash_pending = true;
-        return true;
-    } else {
-        return false;
-    }
+    // Stream a report every frame instead of only on change: a real DualSense
+    // sends continuously, and the measured poll rate is the report rate. The
+    // dongle round-trip is pipelined (next report is queued to the dongle while
+    // the previous signed one is in flight), so this sustains the full rate.
+    // (Auth passthrough still preempts the pipeline via the gate above.)
+    memcpy(&p5GeneralReport_last, &p5GeneralReport, sizeof(p5GeneralReport));
+    memcpy(p5GeneralAuthData->hash_pending_buffer, &p5GeneralReport, sizeof(p5GeneralReport));
+    p5GeneralAuthData->hash_pending = true;
+    return true;
 }
 
 void P5GeneralDriver::processAux() {

@@ -279,6 +279,11 @@ void GP2040::run() {
 		// Pre-Process add-ons for MPGS
 		addons.PreprocessAddons();
 
+		// Drain USB host events again after the (comparatively slow) add-on
+		// reads: the dongle report round-trip needs tuh_task serviced more
+		// than once per loop to sustain one signed report per 1ms frame.
+		USBHostManager::getInstance().process();
+
 		gamepad->process(); // process through MPGS
 
 		// (Post) Process for add-ons
@@ -297,6 +302,10 @@ void GP2040::run() {
 
 		// TinyUSB Task update
 		tud_task();
+
+		// Drain USB host events once more so a dongle response that landed
+		// during driver processing is dispatched without waiting a full loop
+		USBHostManager::getInstance().process();
 
 		// Post-Process Add-ons with USB Report Processed Sent
 		addons.PostprocessAddons(processed);

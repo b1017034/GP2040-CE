@@ -5,6 +5,7 @@
 #include "CRC32.h"
 #include "peripheralmanager.h"
 #include "usbhostmanager.h"
+#include "interval_override.h"
 
 #include <iostream>
 
@@ -101,6 +102,9 @@ void P5GeneralAuthUSBListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t
         ps_dev_addr = dev_addr;
         ps_instance = instance;
         p5GeneralAuthData->dongle_ready = true;
+        // The dongle advertises a slow bInterval; poll it every 1ms frame so the
+        // report round-trip (and thus the PS5-side poll rate) isn't capped by it.
+        interval_override = 1;
     }
 }
 
@@ -115,6 +119,7 @@ void P5GeneralAuthUSBListener::unmount(uint8_t dev_addr) {
     ps_instance = 0xFF;
     resetHostData();
     p5GeneralAuthData->dongle_ready = false;
+    interval_override = 0;
 }
 
 void P5GeneralAuthUSBListener::report_received(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
