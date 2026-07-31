@@ -36,6 +36,11 @@
 
 #define HMLAnalogName "HMLAnalog"
 
+// Directions the gate is measured in. 16 (22.5 apart) is a deliberate ceiling:
+// finer bins need a slower, more careful sweep to fill, and unfilled bins have
+// to be interpolated, which costs more accuracy than the resolution gains.
+#define HML_GATE_BINS 16
+
 #define HML_CURVE_MAX_POINTS 10
 #define HML_RC_CURVE_MAX_POINTS 7
 #define HML_DELAY_SLOTS 40
@@ -84,6 +89,30 @@ public:
     static bool noiseSample(uint16_t* mn, uint16_t* mx, int iterations);
     // Drive the lightbar from the webconfig loop (Core0 add-ons are skipped there)
     static void lightbarTick();
+
+    // ---- Gate calibration ----
+    // Capture runs in the web-config loop, where the USB host is serviced but
+    // the add-on chain is not, so gamepad state holds the untouched controller
+    // values. Sampling has to happen at loop rate - polling it over HTTP would
+    // miss the brief moments the stick is actually against the gate.
+    static void calStart(uint8_t stick);   // 0 = left, 1 = right
+    static void calAbort();
+    static bool calActive();
+    static void calTick();                 // one sample; call every loop
+    // Copy the captured sweep into the profile for this controller, replacing
+    // any existing entry for the VID/PID. False if coverage is too poor.
+    static bool calSave(uint16_t vendorId, uint16_t productId);
+    // Live capture state for the UI
+    static uint8_t  calCoverage();         // percent of directions measured
+    static uint16_t calRadius[HML_GATE_BINS];
+    static uint16_t calCenter[2];
+    static uint8_t  calStick;
+
+    // Map a raw stick pair through a measured gate onto a unit circle. Leaves
+    // the values alone when no profile matches.
+    static bool applyGate(const void* gateV, uint16_t rawX, uint16_t rawY, float& outX, float& outY);
+    // Profile matching the currently mounted controller, or nullptr
+    static const void* gateFor(uint8_t stick);
     static HMLAnalogAddon* instance;
     ADS8332* getAds() { return ads; }
 

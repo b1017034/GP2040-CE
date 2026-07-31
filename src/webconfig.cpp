@@ -2754,6 +2754,57 @@ std::string getHMLAnalogRaw()
 }
 
 
+// ---- Gate calibration ----
+// Start a sweep: leave the stick alone until "centered" goes true, then run it
+// all the way round the gate until coverage reaches 100.
+std::string setHMLCalStart()
+{
+    DynamicJsonDocument doc = get_post_data();
+    uint8_t stick = doc["stick"] | 0;
+    HMLAnalogAddon::calStart(stick);
+    DynamicJsonDocument res(JSON_OBJECT_SIZE(4));
+    res["started"] = true;
+    res["stick"] = stick;
+    return serialize_json(res);
+}
+
+std::string getHMLCalStatus()
+{
+    DynamicJsonDocument doc(JSON_OBJECT_SIZE(32));
+    doc["active"] = HMLAnalogAddon::calActive();
+    doc["stick"] = HMLAnalogAddon::calStick;
+    doc["coverage"] = HMLAnalogAddon::calCoverage();
+    doc["centered"] = HMLAnalogAddon::calCenter[0] != 0 || HMLAnalogAddon::calCenter[1] != 0;
+    doc["centerX"] = HMLAnalogAddon::calCenter[0];
+    doc["centerY"] = HMLAnalogAddon::calCenter[1];
+    JsonArray r = doc.createNestedArray("radius");
+    for (int i = 0; i < HML_GATE_BINS; i++) r.add(HMLAnalogAddon::calRadius[i]);
+    const auto& m = GamepadUSBHostListener::lastMount;
+    doc["vid"] = m.vid;
+    doc["pid"] = m.pid;
+    return serialize_json(doc);
+}
+
+std::string setHMLCalSave()
+{
+    const auto& m = GamepadUSBHostListener::lastMount;
+    bool ok = m.seen && HMLAnalogAddon::calSave(m.vid, m.pid);
+    DynamicJsonDocument res(JSON_OBJECT_SIZE(8));
+    res["saved"] = ok;
+    res["coverage"] = HMLAnalogAddon::calCoverage();
+    res["vid"] = m.vid;
+    res["pid"] = m.pid;
+    return serialize_json(res);
+}
+
+std::string setHMLCalAbort()
+{
+    HMLAnalogAddon::calAbort();
+    DynamicJsonDocument res(JSON_OBJECT_SIZE(2));
+    res["active"] = false;
+    return serialize_json(res);
+}
+
 std::string getHMLNoiseSample()
 {
     // Burst-sample the sticks at rest (~2000 reads) and report per-channel
@@ -3076,6 +3127,10 @@ static const std::pair<const char*, HandlerFuncPtr> handlerFuncs[] =
 	{ "/api/setHMLAnalogOptions", setHMLAnalogOptions },
 	{ "/api/getHMLAnalogRaw", getHMLAnalogRaw },
 	{ "/api/getHMLNoiseSample", getHMLNoiseSample },
+	{ "/api/setHMLCalStart", setHMLCalStart },
+	{ "/api/getHMLCalStatus", getHMLCalStatus },
+	{ "/api/setHMLCalSave", setHMLCalSave },
+	{ "/api/setHMLCalAbort", setHMLCalAbort },
 	{ "/api/setHMLMuxProbe", setHMLMuxProbe },
 	{ "/api/getHeldPins", getHeldPins },
     { "/api/abortGetHeldPins", abortGetHeldPins },

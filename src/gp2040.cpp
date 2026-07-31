@@ -272,6 +272,7 @@ void GP2040::run() {
 			inputDriver->process(gamepad);
 			HMLAnalogAddon::lightbarTick(); // keep the lightbar lit in web-config
 			GamepadUSBHostAddon::hostTick(); // raw host-controller sticks for the live view
+			HMLAnalogAddon::calTick();      // gate-calibration sweep, sampled at loop rate
 			rebootHotkeys.process(gamepad, configMode);
 			checkSaveRebootState();
 			continue;

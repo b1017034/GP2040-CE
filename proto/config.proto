@@ -1010,6 +1010,37 @@ message HMLStickOptions
     optional uint32 angleMapEnable = 45;
 }
 
+// Measured shape of one physical stick gate.
+//
+// A stick's gate is not a circle - it is squarish, and how squarish differs per
+// controller - so the same physical deflection produces a different magnitude
+// depending on direction and on which pad is plugged in. radius[] holds the
+// largest magnitude actually reachable in each of HML_GATE_BINS equally spaced
+// directions, in 1/1000 of full-scale, measured by sweeping the gate. Dividing
+// by it maps the real gate onto a unit circle, after which the FireBird
+// diagonal scaling shapes the output the same way for every controller.
+message HMLGateProfile
+{
+    optional uint32 calCenterX = 1;   // raw 16-bit, at rest
+    optional uint32 calCenterY = 2;
+    optional uint32 calMinX = 3;
+    optional uint32 calMaxX = 4;
+    optional uint32 calMinY = 5;
+    optional uint32 calMaxY = 6;
+    // Gate radius per direction, index 0 = up, going clockwise. 0 = unmeasured
+    repeated uint32 radius = 7 [(nanopb).max_count = 16];
+    optional bool valid = 8;
+}
+
+// Per-controller calibration, applied automatically on VID/PID match
+message HMLCalProfile
+{
+    optional uint32 vendorId = 1;
+    optional uint32 productId = 2;
+    optional HMLGateProfile leftGate = 3;
+    optional HMLGateProfile rightGate = 4;
+}
+
 message HMLAnalogOptions
 {
     optional bool enabled = 1;
@@ -1050,6 +1081,10 @@ message HMLAnalogOptions
     optional int32 comboModeB2 = 26;  // 〇 (east)
     optional int32 comboModeB3 = 27;  // □ (west)
     optional int32 comboModeB4 = 28;  // △ (north)
+    // Per-controller gate calibration, matched on the host controller's VID/PID.
+    // An unmatched controller is passed through unnormalized.
+    repeated HMLCalProfile calProfiles = 29 [(nanopb).max_count = 8];
+    optional bool gateNormalize = 30;  // master switch for the whole feature
 }
 
 message MigrationHistory

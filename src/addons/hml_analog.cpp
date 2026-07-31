@@ -1,6 +1,9 @@
 #include "addons/hml_analog.h"
 #include "storagemanager.h"
 #include "peripheralmanager.h"
+#include "eventmanager.h"
+#include "addons/gamepad_usb_host_listener.h"
+#include <string.h>
 #include "hardware/adc.h"
 #include "hardware/pio.h"
 #include "pico/time.h"
@@ -618,6 +621,239 @@ void HMLAnalogAddon::process() {
     lastMicros = to_us_since_boot(get_absolute_time());
 }
 
+// ---------------------------------------------------------------------------
+// Gate calibration
+//
+// A stick gate is squarish, and differently so per controller, so the same
+// physical deflection reaches a different magnitude depending on direction.
+// Worse, everything past the unit circle used to be thrown away by the
+// clamp in processStick, which is most of the reach in the diagonals on a
+// square-gated stick. Measuring the gate and dividing by it makes "pushed all
+// the way" equal 1.0 in every direction and on every controller; the FireBird
+// diagonal scaling then shapes the output, identically for all of them.
+// ---------------------------------------------------------------------------
+
+uint16_t HMLAnalogAddon::calRadius[HML_GATE_BINS] = {0};
+uint16_t HMLAnalogAddon::calCenter[2] = {0, 0};
+uint8_t  HMLAnalogAddon::calStick = 0;
+static bool     calRunning = false;
+static uint32_t calCenterAcc[2] = {0, 0};
+static uint32_t calCenterCount = 0;
+static uint16_t calAxisMin[2], calAxisMax[2];
+
+// Accumulate the sweep far finer than it is stored. Taking the largest radius
+// across a whole 22.5 degree wedge and then treating it as the radius at the
+// wedge centre badly overstates it wherever the gate turns quickly - on a
+// square gate the error reaches 15% approaching the corners, which shows up as
+// not being able to reach full output. Sampling at 2.8 degrees and reading off
+// the value at each stored direction keeps that under a couple of percent,
+// which the outer deadzone absorbs.
+#define CAL_FINE_BINS 128
+static uint16_t calFine[CAL_FINE_BINS];
+
+// Samples averaged for the centre before the sweep is recorded. At loop rate
+// this is a fraction of a second, so "let go, then start" is enough.
+#define CAL_CENTER_SAMPLES 256
+
+// Direction of (x, y) in bins, and the raw magnitude in the same units the
+// radius table stores (1/1000 of half-scale).
+// Unit vectors of the stored directions, built once. Recomputing them with
+// sinf/cosf every sample would be a few thousand trig calls a second on a chip
+// with no FPU, for sixteen constants.
+static float gateSin[HML_GATE_BINS], gateCos[HML_GATE_BINS];
+static bool  gateDirInit = false;
+static void gateDirBuild() {
+    if (gateDirInit) return;
+    for (int i = 0; i < HML_GATE_BINS; i++) {
+        float a = (float)i * (2.0f * 3.14159265f / HML_GATE_BINS);
+        gateSin[i] = sinf(a);
+        gateCos[i] = cosf(a);
+    }
+    gateDirInit = true;
+}
+static const float* gateDirSin() { gateDirBuild(); return gateSin; }
+static const float* gateDirCos() { gateDirBuild(); return gateCos; }
+
+static inline float calAngleDeg(float x, float y) {
+    float a = atan2f(x, y) * 57.29578f;
+    if (a < 0.0f) a += 360.0f;
+    return a;
+}
+
+// Read the stored directions out of the fine sweep: value at the bin centre,
+// widening only far enough to find a sample if that exact slice was missed.
+static void calBuildCoarse(uint16_t* out) {
+    const int perBin = CAL_FINE_BINS / HML_GATE_BINS;
+    for (int i = 0; i < HML_GATE_BINS; i++) {
+        int centre = i * perBin;
+        uint16_t v = 0;
+        for (int w = 0; w < perBin && v == 0; w++) {
+            int a = (centre - w + CAL_FINE_BINS) % CAL_FINE_BINS;
+            int b = (centre + w) % CAL_FINE_BINS;
+            v = std::max(calFine[a], calFine[b]);
+        }
+        out[i] = v;
+    }
+}
+
+void HMLAnalogAddon::calStart(uint8_t stick) {
+    calStick = stick > 1 ? 1 : stick;
+    memset(calRadius, 0, sizeof(calRadius));
+    memset(calFine, 0, sizeof(calFine));
+    calCenterAcc[0] = calCenterAcc[1] = 0;
+    calCenterCount = 0;
+    calCenter[0] = calCenter[1] = 0;
+    calAxisMin[0] = calAxisMin[1] = 0xFFFF;
+    calAxisMax[0] = calAxisMax[1] = 0;
+    calRunning = true;
+}
+
+void HMLAnalogAddon::calAbort() { calRunning = false; }
+bool HMLAnalogAddon::calActive() { return calRunning; }
+
+uint8_t HMLAnalogAddon::calCoverage() {
+    calBuildCoarse(calRadius);
+    uint8_t n = 0;
+    for (int i = 0; i < HML_GATE_BINS; i++) if (calRadius[i] > 0) n++;
+    return (uint8_t)(n * 100 / HML_GATE_BINS);
+}
+
+void HMLAnalogAddon::calTick() {
+    if (!calRunning) return;
+    Gamepad *gamepad = Storage::getInstance().GetGamepad();
+    uint16_t rx = calStick == 0 ? gamepad->state.lx : gamepad->state.rx;
+    uint16_t ry = calStick == 0 ? gamepad->state.ly : gamepad->state.ry;
+
+    // Centre first, from the stick sitting at rest
+    if (calCenterCount < CAL_CENTER_SAMPLES) {
+        calCenterAcc[0] += rx;
+        calCenterAcc[1] += ry;
+        if (++calCenterCount == CAL_CENTER_SAMPLES) {
+            calCenter[0] = (uint16_t)(calCenterAcc[0] / CAL_CENTER_SAMPLES);
+            calCenter[1] = (uint16_t)(calCenterAcc[1] / CAL_CENTER_SAMPLES);
+        }
+        return;
+    }
+
+    if (rx < calAxisMin[0]) calAxisMin[0] = rx;
+    if (rx > calAxisMax[0]) calAxisMax[0] = rx;
+    if (ry < calAxisMin[1]) calAxisMin[1] = ry;
+    if (ry > calAxisMax[1]) calAxisMax[1] = ry;
+
+    float x = ((float)rx - (float)calCenter[0]) / 32768.0f;
+    float y = ((float)ry - (float)calCenter[1]) / 32768.0f;
+    float mag = sqrtf(x * x + y * y);
+    if (mag < 0.15f) return;  // near centre the direction is meaningless
+
+    int bin = (int)(calAngleDeg(x, y) / (360.0f / CAL_FINE_BINS));
+    if (bin < 0) bin = 0;
+    if (bin >= CAL_FINE_BINS) bin = CAL_FINE_BINS - 1;
+    uint16_t r = (uint16_t)(mag * 1000.0f);
+    if (r > calFine[bin]) calFine[bin] = r;
+}
+
+bool HMLAnalogAddon::calSave(uint16_t vendorId, uint16_t productId) {
+    calRunning = false;
+    // Every direction must have been reached: a partial sweep would normalize
+    // the missing ones against interpolated guesses
+    if (calCoverage() < 100 || calCenterCount < CAL_CENTER_SAMPLES) return false;
+
+    HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+
+    HMLCalProfile* slot = nullptr;
+    for (pb_size_t i = 0; i < opts.calProfiles_count; i++) {
+        if (opts.calProfiles[i].vendorId == vendorId && opts.calProfiles[i].productId == productId) {
+            slot = &opts.calProfiles[i];
+            break;
+        }
+    }
+    if (slot == nullptr) {
+        if (opts.calProfiles_count >= 8) return false;   // full; drop one first
+        slot = &opts.calProfiles[opts.calProfiles_count++];
+        *slot = HMLCalProfile HMLCalProfile_init_zero;
+    }
+    slot->vendorId = vendorId;   slot->has_vendorId = true;
+    slot->productId = productId; slot->has_productId = true;
+
+    HMLGateProfile& g = (calStick == 0) ? slot->leftGate : slot->rightGate;
+    if (calStick == 0) slot->has_leftGate = true; else slot->has_rightGate = true;
+    g = HMLGateProfile HMLGateProfile_init_zero;
+    g.calCenterX = calCenter[0]; g.has_calCenterX = true;
+    g.calCenterY = calCenter[1]; g.has_calCenterY = true;
+    g.calMinX = calAxisMin[0];   g.has_calMinX = true;
+    g.calMaxX = calAxisMax[0];   g.has_calMaxX = true;
+    g.calMinY = calAxisMin[1];   g.has_calMinY = true;
+    g.calMaxY = calAxisMax[1];   g.has_calMaxY = true;
+    calBuildCoarse(calRadius);
+    g.radius_count = HML_GATE_BINS;
+    for (int i = 0; i < HML_GATE_BINS; i++) g.radius[i] = calRadius[i];
+    g.valid = true; g.has_valid = true;
+
+    EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true));
+    return true;
+}
+
+const void* HMLAnalogAddon::gateFor(uint8_t stick) {
+    const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    if (!opts.gateNormalize) return nullptr;
+    const auto& m = GamepadUSBHostListener::lastMount;
+    if (!m.seen) return nullptr;
+    for (pb_size_t i = 0; i < opts.calProfiles_count; i++) {
+        const HMLCalProfile& p = opts.calProfiles[i];
+        if (p.vendorId != m.vid || p.productId != m.pid) continue;
+        const HMLGateProfile& g = (stick == 0) ? p.leftGate : p.rightGate;
+        return g.valid ? (const void*)&g : nullptr;
+    }
+    return nullptr;
+}
+
+bool HMLAnalogAddon::applyGate(const void* gateV, uint16_t rawX, uint16_t rawY, float& outX, float& outY) {
+    if (gateV == nullptr) return false;
+    const HMLGateProfile& g = *(const HMLGateProfile*)gateV;
+    if (!g.valid || g.radius_count < HML_GATE_BINS) return false;
+
+    float x = ((float)rawX - (float)g.calCenterX) / 32768.0f;
+    float y = ((float)rawY - (float)g.calCenterY) / 32768.0f;
+    float mag = sqrtf(x * x + y * y);
+    if (mag < 1e-5f) { outX = 0.0f; outY = 0.0f; return true; }
+
+    // Reconstruct the gate as a polygon through the measured points and
+    // intersect the ray with it, rather than interpolating radius against
+    // angle. These gates are squarish, and a straight edge is a straight line
+    // in x/y but a 1/cos curve in polar - interpolating in polar cuts about 5%
+    // off the reach midway between samples, while the polygon sits exactly on
+    // a flat edge. Directions land on multiples of the step, so both the axes
+    // and the diagonals - the corners of the shape - are stored samples.
+    const float step = 360.0f / HML_GATE_BINS;
+    float a = calAngleDeg(x, y) / step;
+    int i0 = (int)a;
+    int i1 = (i0 + 1) % HML_GATE_BINS;
+    i0 %= HML_GATE_BINS;
+    float r0 = (float)g.radius[i0] / 1000.0f;
+    float r1 = (float)g.radius[i1] / 1000.0f;
+    if (r0 < 0.05f || r1 < 0.05f) return false;   // implausible measurement
+
+    const float* ds = gateDirSin();
+    const float* dc = gateDirCos();
+    float p0x = r0 * ds[i0], p0y = r0 * dc[i0];
+    float p1x = r1 * ds[i1], p1y = r1 * dc[i1];
+    float ex = p1x - p0x, ey = p1y - p0y;
+    float dx = x / mag, dy = y / mag;              // ray direction
+    float den = dx * ey - dy * ex;
+    if (fabsf(den) < 1e-6f) return false;
+    float r = (p0x * ey - p0y * ex) / den;
+    if (r < 0.05f) return false;
+
+    float scale = 1.0f / r;
+    outX = std::clamp(x * scale, -1.0f, 1.0f);
+    outY = std::clamp(y * scale, -1.0f, 1.0f);
+    // Full deflection must not exceed the unit circle, or the clamp in
+    // processStick starts discarding reach again
+    float om = sqrtf(outX * outX + outY * outY);
+    if (om > 1.0f) { outX /= om; outY /= om; }
+    return true;
+}
+
 // Gamepad-state stick source (MeisterConverter: DualSense -> USB host add-on).
 // The pair is already normalized 0..65535 by the host driver, so there is no
 // ADC scan and no hardware X inversion to undo. Everything downstream - noise
@@ -635,21 +871,26 @@ void HMLAnalogAddon::processGamepadState() {
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
 
     auto runStick = [&](const HMLStickOptions& s, HMLStickState& st,
-                        uint16_t& axX, uint16_t& axY) {
+                        uint16_t& axX, uint16_t& axY, uint8_t stickIndex) {
         uint16_t rx16 = axX, ry16 = axY;
         if (s.noiseSuppress) {
             if (!st.heldInit) { st.heldX = rx16; st.heldY = ry16; st.heldInit = true; }
             rx16 = gateAxis(rx16, st.heldX, s.noiseX);
             ry16 = gateAxis(ry16, st.heldY, s.noiseY);
         }
-        float rawX = calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
-        float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
+        // A measured gate supersedes the per-axis calibration: it carries its
+        // own centre and normalizes every direction, not just the axes.
+        float rawX, rawY;
+        if (!applyGate(gateFor(stickIndex), rx16, ry16, rawX, rawY)) {
+            rawX = calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
+            rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
+        }
         float outX = 0.0f, outY = 0.0f;
         processStick(&s, st, rawX, rawY, outX, outY);
         axX = (uint16_t)std::clamp((outX + 1.0f) * 32767.5f, 0.0f, 65535.0f);
         axY = (uint16_t)std::clamp((outY + 1.0f) * 32767.5f, 0.0f, 65535.0f);
     };
 
-    runStick(opts.leftStick,  leftState,  gamepad->state.lx, gamepad->state.ly);
-    runStick(opts.rightStick, rightState, gamepad->state.rx, gamepad->state.ry);
+    runStick(opts.leftStick,  leftState,  gamepad->state.lx, gamepad->state.ly, 0);
+    runStick(opts.rightStick, rightState, gamepad->state.rx, gamepad->state.ry, 1);
 }

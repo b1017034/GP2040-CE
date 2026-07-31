@@ -1200,6 +1200,8 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarColor, HML_LIGHTBAR_COLOR);
     // Share+Options+face-button mode combos: x=XInput, o=PS5(GNS), square=PS4,
     // triangle=Switch
+    // No-op until a controller has a saved gate profile, so it can just be on
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, gateNormalize, true);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB1, HML_COMBO_MODE_B1);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB2, HML_COMBO_MODE_B2);
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB3, HML_COMBO_MODE_B3);
