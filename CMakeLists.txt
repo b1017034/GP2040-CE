@@ -321,6 +321,7 @@ src/animationstation/effects/rainbow.cpp
 src/animationstation/effects/staticcolor.cpp
 src/animationstation/effects/statictheme.cpp
 src/hosts/DualsensePS5Host.cpp
+src/hosts/GenericHIDHost.cpp
 src/hosts/DualshockPS4Host.cpp
 src/hosts/GoogleStadioHost.cpp
 src/hosts/DrivingForceHost.cpp

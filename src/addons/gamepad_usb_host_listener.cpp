@@ -10,6 +10,7 @@
 #include "hosts/Ultrastik360Host.h"
 #include "hosts/SwitchProHost.h"
 #include "hosts/Xbox360Host.h"
+#include "hosts/GenericHIDHost.h"
 
 /*
 #include "hosts/XboxOneHost.h"
@@ -56,11 +57,11 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
         _controller_host = new Ultrastik360Host();
     } else if ( SwitchProHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new SwitchProHost();
-    } else {
-        // Better way to determine if its a generic HID?
-
-        //if ( GenericHIDHost::match(vid, pid) ) { // do we want this one?
-        //controllerHost = new GenericHIDHost();
+    } else if ( GenericHIDHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
+        // Last resort: anything that declares itself a joystick or gamepad and
+        // reports X/Y. The driver reads the report descriptor for the field
+        // layout, so no VID/PID entry is needed.
+        _controller_host = new GenericHIDHost();
     }
 
     if ( _controller_host != nullptr ) {
