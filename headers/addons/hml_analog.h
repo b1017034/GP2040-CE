@@ -14,6 +14,26 @@
 #define HML_ANALOG_ENABLED 0
 #endif
 
+// Analog trigger calibration in raw ADC counts (pressed pulls the line low).
+// Board-specific and only meaningful when ltAdcPin/rtAdcPin are assigned, so
+// boards without hall triggers - e.g. the MeisterConverter, whose triggers
+// arrive over USB already scaled - just take these inert defaults.
+#ifndef HML_TRIGGER_LT_IDLE
+#define HML_TRIGGER_LT_IDLE 4095
+#endif
+#ifndef HML_TRIGGER_LT_PRESSED
+#define HML_TRIGGER_LT_PRESSED 0
+#endif
+#ifndef HML_TRIGGER_RT_IDLE
+#define HML_TRIGGER_RT_IDLE 4095
+#endif
+#ifndef HML_TRIGGER_RT_PRESSED
+#define HML_TRIGGER_RT_PRESSED 0
+#endif
+#ifndef HML_TRIGGER_DIGITAL_PERCENT
+#define HML_TRIGGER_DIGITAL_PERCENT 40
+#endif
+
 #define HMLAnalogName "HMLAnalog"
 
 #define HML_CURVE_MAX_POINTS 10
