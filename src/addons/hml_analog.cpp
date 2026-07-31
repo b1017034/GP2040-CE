@@ -806,7 +806,12 @@ bool HMLAnalogAddon::calSave(uint16_t vendorId, uint16_t productId) {
 const void* HMLAnalogAddon::gateFor(uint8_t stick) {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     if (!opts.gateNormalize) return nullptr;
-    const auto& m = GamepadUSBHostListener::lastMount;
+    // The controller actually feeding the sticks, not the last mount attempt.
+    // lastMount is overwritten by mounts we reject - a second HID interface on
+    // the same pad, an auth dongle, anything else on the hub - so keying the
+    // profile lookup on it silently skips normalization whenever the most
+    // recent attempt came from something other than the controller in use.
+    const auto& m = GamepadUSBHostListener::active;
     if (!m.seen) return nullptr;
     for (pb_size_t i = 0; i < opts.calProfiles_count; i++) {
         const HMLCalProfile& p = opts.calProfiles[i];

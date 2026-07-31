@@ -312,8 +312,11 @@ void handleSet(const uint8_t *buffer, uint16_t bufsize) {
         HMLAnalogAddon::calStart(buffer[1]);
         break;
     case 0x07: // CAL_SAVE: store the sweep against the mounted controller
-        HMLAnalogAddon::calSave(GamepadUSBHostListener::lastMount.vid,
-                                GamepadUSBHostListener::lastMount.pid);
+        // Key the profile on the controller in use, matching the lookup in
+        // HMLAnalogAddon::gateFor. Saving against a rejected mount would store
+        // the sweep where nothing ever looks for it.
+        HMLAnalogAddon::calSave(GamepadUSBHostListener::active.vid,
+                                GamepadUSBHostListener::active.pid);
         break;
     case 0x08: // CAL_ABORT
         HMLAnalogAddon::calAbort();
