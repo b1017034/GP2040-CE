@@ -169,7 +169,21 @@ compile_proto()
 #pull in tinyUSB
 set(PICO_TINYUSB_PATH "${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb")
 
-set(PICO_USE_FASTEST_SUPPORTED_CLOCK 1)
+# The SDK's "fastest supported clock" is a 200MHz overclock on RP2040 (stock is
+# 125MHz), which the PS5 poll-rate pipeline leans on. It also runs the flash at
+# SYS_CLK/PICO_FLASH_SPI_CLKDIV, i.e. 100MHz at clkdiv 2, and needs a raised
+# core voltage - neither is a given on every RP2040 + flash part. A board whose
+# silicon does not take it can opt out from its configs/<board>/<board>.cmake,
+# which is included before this point.
+if(NOT DEFINED GP2040_OVERCLOCK)
+  set(GP2040_OVERCLOCK ON)
+endif()
+if(GP2040_OVERCLOCK)
+  message(STATUS "System clock: 200MHz (fastest supported)")
+  set(PICO_USE_FASTEST_SUPPORTED_CLOCK 1)
+else()
+  message(STATUS "System clock: 125MHz (stock)")
+endif()
 
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
