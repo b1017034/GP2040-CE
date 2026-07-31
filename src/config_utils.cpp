@@ -192,6 +192,20 @@
     #define DEFAULT_PS4_REPORTHACK false
 #endif
 
+// Share+Options+face-button input-mode combos (see gp2040.cpp); -1 disables one
+#ifndef HML_COMBO_MODE_B1
+    #define HML_COMBO_MODE_B1 INPUT_MODE_XINPUT
+#endif
+#ifndef HML_COMBO_MODE_B2
+    #define HML_COMBO_MODE_B2 INPUT_MODE_P5GENERAL
+#endif
+#ifndef HML_COMBO_MODE_B3
+    #define HML_COMBO_MODE_B3 INPUT_MODE_PS4
+#endif
+#ifndef HML_COMBO_MODE_B4
+    #define HML_COMBO_MODE_B4 INPUT_MODE_SWITCH
+#endif
+
 #ifndef DEFAULT_PS4AUTHENTICATION_TYPE
     #define DEFAULT_PS4AUTHENTICATION_TYPE INPUT_MODE_AUTH_TYPE_NONE
 #endif
@@ -1186,10 +1200,10 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, lightbarColor, HML_LIGHTBAR_COLOR);
     // Share+Options+face-button mode combos: x=XInput, o=PS5(GNS), square=PS4,
     // triangle=Switch
-    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB1, INPUT_MODE_XINPUT);
-    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB2, INPUT_MODE_P5GENERAL);
-    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB3, INPUT_MODE_PS4);
-    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB4, INPUT_MODE_SWITCH);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB1, HML_COMBO_MODE_B1);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB2, HML_COMBO_MODE_B2);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB3, HML_COMBO_MODE_B3);
+    INIT_UNSET_PROPERTY(config.addonOptions.hmlAnalogOptions, comboModeB4, HML_COMBO_MODE_B4);
     for (auto* stick : { &config.addonOptions.hmlAnalogOptions.leftStick,
                          &config.addonOptions.hmlAnalogOptions.rightStick }) {
         INIT_UNSET_PROPERTY((*stick), calMinX, 0);

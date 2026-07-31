@@ -38,6 +38,10 @@ class GamepadUSBHostListener : public USBListener {
             bool     hasXY = false;
         };
         static MountInfo lastMount;
+
+        // True for PS4/PS5 and P5General auth dongles, which must not be
+        // mistaken for the input controller
+        static bool isAuthDongle(uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len);
     private:
         uint8_t _controller_dev_addr;
         uint8_t _controller_instance;

@@ -65,6 +65,21 @@
 #define HML_ANALOG_RT_ADC_PIN -1
 #define HML_LIGHTBAR_ENABLED false
 
+// PS4 and PS5 output modes sign every report through a licensed dongle, and
+// this board has spare hub ports to put one on, so route both at the USB
+// passthrough path rather than leaving them unauthenticated. Without this they
+// default to AUTH_TYPE_NONE: PS4 drops out after ~8 minutes and PS5 (which is
+// the PS4 arcade-stick personality) is not accepted at all.
+#define DEFAULT_PS4AUTHENTICATION_TYPE INPUT_MODE_AUTH_TYPE_USB
+#define DEFAULT_PS5AUTHENTICATION_TYPE INPUT_MODE_AUTH_TYPE_USB
+
+// Host-controller combos, held for REBOOT_HOTKEY_HOLD_TIME_MS with
+// Share+Options. The three modes this board is for, plus P5General.
+#define HML_COMBO_MODE_B1 INPUT_MODE_XINPUT
+#define HML_COMBO_MODE_B2 INPUT_MODE_PS5
+#define HML_COMBO_MODE_B3 INPUT_MODE_PS4
+#define HML_COMBO_MODE_B4 INPUT_MODE_P5GENERAL
+
 // Boot into XInput, NOT P5General: P5GeneralDriver::process() returns false
 // until the dongle authenticates, so a board defaulting to P5General looks dead
 // on a PC (and on a PS5 with the dongle unplugged). XInput needs no auth, so

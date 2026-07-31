@@ -18,6 +18,21 @@
 
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::lastMount;
 
+// A device whose job is signing auth challenges, not sending inputs: the PS4/
+// PS5 dongle (Sony vendor page 0xFFF0 with report 0xF3, the same test
+// PS4AuthUSBListener uses) or the P5General dongle.
+bool GamepadUSBHostListener::isAuthDongle(uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len) {
+    if ( vid == 0x2B81 && pid == 0x0101 ) return true;   // P5General
+    if ( desc_report == nullptr || desc_len == 0 ) return false;
+    tuh_hid_report_info_t report_info[4];
+    uint8_t report_count = tuh_hid_parse_report_descriptor(report_info, 4, desc_report, desc_len);
+    for ( uint8_t i = 0; i < report_count; i++ ) {
+        if ( report_info[i].usage_page == 0xFFF0 && report_info[i].report_id == 0xF3 )
+            return true;
+    }
+    return false;
+}
+
 void GamepadUSBHostListener::setup() {
     _controller_host = nullptr;
     _controller_dev_addr = 0;
@@ -53,6 +68,16 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
     lastMount.pid = pid;
     lastMount.descLen = desc_len;
     lastMount.instance = instance;
+
+    // Never claim an authentication dongle as the input controller. Licensed
+    // PS4/PS5 dongles and sticks also present a gamepad collection, so with a
+    // single controller slot the dongle would take it and lock the real
+    // controller out. They are identified the same way PS4AuthUSBListener does
+    // it - the Sony vendor page - plus the P5General dongle by VID/PID.
+    if ( isAuthDongle(vid, pid, desc_report, desc_len) ) {
+        lastMount.driver = "auth-dongle";
+        return;
+    }
 
     // Only host one controller at a time
     if ( _controller_host != nullptr ) {
