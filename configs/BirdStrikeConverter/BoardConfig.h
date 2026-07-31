@@ -1,12 +1,15 @@
-#ifndef MEISTERCONVERTER_BOARD_CONFIG_H_
-#define MEISTERCONVERTER_BOARD_CONFIG_H_
+#ifndef BIRDSTRIKECONVERTER_BOARD_CONFIG_H_
+#define BIRDSTRIKECONVERTER_BOARD_CONFIG_H_
 
 #include "enums.pb.h"
 #include "class/hid/hid.h"
 
-// MeisterConverter (github.com/AlpenmeisterCustoms/MeisterConverter) as a
-// DualSense tuning pass-through: DualSense + PS5 auth dongle plug into the
-// board's USB-A inputs, the board outputs to the console from USB1.
+// BirdStrike Converter: a DualSense tuning pass-through. The controller and a
+// PS5 auth dongle plug into the board's USB-A inputs, and the board outputs to
+// the console from USB1.
+//
+// Hardware is the MeisterConverter (github.com/AlpenmeisterCustoms/
+// MeisterConverter); BirdStrike Converter is this firmware running on it.
 //
 // Wiring taken from the V1.1 KiCad source (the published repo ships gerbers
 // and a BOM only; the schematic is recoverable from git history):
@@ -19,7 +22,7 @@
 //   SW19 -> GPIO1 (only user button), SW20 -> RUN, SW18 -> BOOTSEL
 //   F1   500mA polyfuse feeding the shared VBUS of all three input ports
 // U3 SWCLK/SWDIO (pads 24/25) are unconnected: no SWD, debug over USB only.
-#define BOARD_CONFIG_LABEL "MeisterConverter"
+#define BOARD_CONFIG_LABEL "BirdStrike Converter"
 
 // SW19 is the only user button on the board (SW20 = RUN, SW18 = BOOTSEL).
 // Spend it on S2, matching the vendor's own config: S2 is what boots into web
