@@ -24,6 +24,9 @@
 // U3 SWCLK/SWDIO (pads 24/25) are unconnected: no SWD, debug over USB only.
 #define BOARD_CONFIG_LABEL "BirdStrike Converter"
 
+// USB product string: what the BirdStrike config tool and the OS show
+#define XINPUT_PRODUCT_NAME "BirdStrike Converter"
+
 // SW19 is the only user button on the board (SW20 = RUN, SW18 = BOOTSEL).
 // Spend it on S2, matching the vendor's own config: S2 is what boots into web
 // config (hold while plugging in), which is the one thing that must not depend

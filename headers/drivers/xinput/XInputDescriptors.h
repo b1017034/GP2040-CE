@@ -67,8 +67,15 @@ typedef enum {
 
 static const uint8_t xinput_string_language[]    = { 0x09, 0x04 };
 static const uint8_t xinput_string_serial[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+// USB product string, which is the name the BirdStrike config tool and the OS
+// show. Per-board so each build identifies itself; the HML pad keeps the plain
+// name it has always reported.
+#ifndef XINPUT_PRODUCT_NAME
+#define XINPUT_PRODUCT_NAME "BirdStrike"
+#endif
+
 static const uint8_t xinput_string_manfacturer[] = "WSK";
-static const uint8_t xinput_string_product[]     = "BirdStrike";
+static const uint8_t xinput_string_product[]     = XINPUT_PRODUCT_NAME;
 static uint8_t xinput_string_version[]     = "08FEC93"; // Serial that is overridden by Pico ID
 static const uint8_t xinput_string_xsm3[]        = "Xbox Security Method 3, Version 1.00, \xa9 2005 Microsoft Corporation. All rights reserved.";
 

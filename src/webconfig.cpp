@@ -2510,6 +2510,7 @@ static bool _abortGetHeldPins = false;
 
 // ---- HML Analog (ADS8332 sticks + RC filter) ----
 #include "addons/hml_analog.h"
+#include "addons/gamepad_usb_host_listener.h"
 
 static void hmlStickToJson(JsonObject o, const HMLStickOptions& s)
 {
@@ -2735,6 +2736,20 @@ std::string getHMLAnalogRaw()
     Gamepad * live = Storage::getInstance().GetGamepad();
     doc["hostLx"] = live->state.lx; doc["hostLy"] = live->state.ly;
     doc["hostRx"] = live->state.rx; doc["hostRy"] = live->state.ry;
+    // What the USB host actually saw on the last controller mount. "seen"
+    // false means the USB stack never handed us the device at all, which is a
+    // different fault from a device we were handed and declined.
+    const auto& m = GamepadUSBHostListener::lastMount;
+    JsonObject host = doc.createNestedObject("hostMount");
+    host["seen"] = m.seen;
+    host["hid"] = m.hid;
+    host["vid"] = m.vid;
+    host["pid"] = m.pid;
+    host["descLen"] = m.descLen;
+    host["instance"] = m.instance;
+    host["driver"] = m.driver;
+    host["gamepadUsage"] = m.isGamepadUsage;
+    host["hasXY"] = m.hasXY;
     return serialize_json(doc);
 }
 
