@@ -21,10 +21,11 @@
 // U3 SWCLK/SWDIO (pads 24/25) are unconnected: no SWD, debug over USB only.
 #define BOARD_CONFIG_LABEL "MeisterConverter"
 
-// SW19 is the only user button on the board (SW20 = RUN, SW18 = BOOTSEL), so
-// spend it on the hotkey modifier: FN plus a DualSense button reaches every
-// hotkey action without needing a free hand on the converter.
-#define GPIO_PIN_01 GpioAction::BUTTON_PRESS_FN
+// SW19 is the only user button on the board (SW20 = RUN, SW18 = BOOTSEL).
+// Spend it on S2, matching the vendor's own config: S2 is what boots into web
+// config (hold while plugging in), which is the one thing that must not depend
+// on a host controller being enumerated.
+#define GPIO_PIN_01 GpioAction::BUTTON_PRESS_S2
 // Everything else is unconnected. GP2040-CE pulls unmapped inputs up, so the
 // floating GPIO0-23 nets read as released.
 
@@ -34,6 +35,9 @@
 #define USB_PERIPHERAL_ENABLED 1
 #define USB_PERIPHERAL_PIN_DPLUS 24
 #define USB_PERIPHERAL_PIN_ORDER 0
+// Keep the GPIO mapper off the host pair; PIO-USB owns these two.
+#define GPIO_PIN_24 GpioAction::ASSIGNED_TO_ADDON
+#define GPIO_PIN_25 GpioAction::ASSIGNED_TO_ADDON
 
 // Read the DualSense through the USB host add-on...
 #define GAMEPAD_USB_HOST_ENABLED 1
