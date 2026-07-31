@@ -684,8 +684,13 @@ static void gateDirBuild() {
 static const float* gateDirSin() { gateDirBuild(); return gateSin; }
 static const float* gateDirCos() { gateDirBuild(); return gateCos; }
 
+// Direction of (x, y) in degrees, 0 = up, increasing clockwise - the
+// convention the stored table, the tool's plot and the proto all state. Note y
+// runs positive-down here, as it does everywhere else in gamepad state (ly 0 is
+// up), hence the negation: without it index 0 lands on down and the plot comes
+// out mirrored vertically against the live position.
 static inline float calAngleDeg(float x, float y) {
-    float a = atan2f(x, y) * 57.29578f;
+    float a = atan2f(x, -y) * 57.29578f;
     if (a < 0.0f) a += 360.0f;
     return a;
 }
@@ -850,8 +855,9 @@ bool HMLAnalogAddon::applyGate(const void* gateV, uint16_t rawX, uint16_t rawY, 
 
     const float* ds = gateDirSin();
     const float* dc = gateDirCos();
-    float p0x = r0 * ds[i0], p0y = r0 * dc[i0];
-    float p1x = r1 * ds[i1], p1y = r1 * dc[i1];
+    // Same positive-down frame as the incoming values, so "up" is -cos
+    float p0x = r0 * ds[i0], p0y = -r0 * dc[i0];
+    float p1x = r1 * ds[i1], p1y = -r1 * dc[i1];
     float ex = p1x - p0x, ey = p1y - p0y;
     float dx = x / mag, dy = y / mag;              // ray direction
     float den = dx * ey - dy * ex;
