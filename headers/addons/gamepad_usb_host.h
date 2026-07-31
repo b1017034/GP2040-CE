@@ -23,6 +23,12 @@ public:
     virtual void postprocess(bool sent) {}
     virtual void reinit() {}
     virtual std::string name() { return GamepadUSBHostName; }
+
+    // Pull the host controller into gamepad state from the web-config loop,
+    // where Core0 add-ons are otherwise skipped. Lets the live view show what
+    // the controller actually sends, untouched by the tuning stage.
+    static void hostTick();
+    static GamepadUSBHostAddon* instance;
 private:
 };
 

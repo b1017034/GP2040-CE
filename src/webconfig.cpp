@@ -2728,6 +2728,13 @@ std::string getHMLAnalogRaw()
     doc["lx"] = gamepad->state.lx; doc["ly"] = gamepad->state.ly;
     doc["rx"] = gamepad->state.rx; doc["ry"] = gamepad->state.ry;
     doc["lt"] = gamepad->state.lt; doc["rt"] = gamepad->state.rt;
+    // Untuned sticks straight off the host controller: web-config skips the
+    // add-on chain, so GetGamepad() here is what the controller sent, before
+    // deadzones/curves/filtering. Use these to measure the controller itself -
+    // e.g. how many counts around centre a DualSense reports flat.
+    Gamepad * live = Storage::getInstance().GetGamepad();
+    doc["hostLx"] = live->state.lx; doc["hostLy"] = live->state.ly;
+    doc["hostRx"] = live->state.rx; doc["hostRy"] = live->state.ry;
     return serialize_json(doc);
 }
 

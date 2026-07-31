@@ -271,6 +271,7 @@ void GP2040::run() {
 		if (configMode == true) {
 			inputDriver->process(gamepad);
 			HMLAnalogAddon::lightbarTick(); // keep the lightbar lit in web-config
+			GamepadUSBHostAddon::hostTick(); // raw host-controller sticks for the live view
 			rebootHotkeys.process(gamepad, configMode);
 			checkSaveRebootState();
 			continue;
