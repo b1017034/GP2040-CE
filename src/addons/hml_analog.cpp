@@ -21,9 +21,13 @@ static const uint8_t CURVE_PRESETS[5][3][2] = {
     {{30,25},{70,75},{100,100}},   // 4 smooth start
 };
 
+// Two stick sources share this add-on, picked by what the board actually has:
+// SPI block 0 present -> ADS8332 hall sticks (HML board); absent -> the sticks
+// already in gamepad state, put there by a USB host add-on (a DualSense on the
+// MeisterConverter). Auto-detected so no extra config knob exists to get wrong.
 bool HMLAnalogAddon::available() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
-    return opts.enabled && PeripheralManager::getInstance().isSPIEnabled(0);
+    return opts.enabled;
 }
 
 void HMLAnalogAddon::setup() {
@@ -31,9 +35,12 @@ void HMLAnalogAddon::setup() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     const PeripheralOptions& periph = Storage::getInstance().getPeripheralOptions();
 
-    PeripheralSPI *spi = PeripheralManager::getInstance().getSPI(0);
-    ads = new ADS8332(spi, periph.blockSPI0.cs, periph.blockSPI0.rx);
-    ads->init();
+    adcSource = PeripheralManager::getInstance().isSPIEnabled(0);
+    if (adcSource) {
+        PeripheralSPI *spi = PeripheralManager::getInstance().getSPI(0);
+        ads = new ADS8332(spi, periph.blockSPI0.cs, periph.blockSPI0.rx);
+        ads->init();
+    }
 
     adc_init(); // RP2040 ADC peripheral must be initialized before any adc_read()
     if (opts.ltAdcPin >= 26 && opts.ltAdcPin <= 29) adc_gpio_init(opts.ltAdcPin);
@@ -542,6 +549,11 @@ static uint16_t gateAxis(uint16_t raw, uint16_t& held, uint32_t band) {
 
 void HMLAnalogAddon::process() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    if (!adcSource) {
+        processGamepadState();
+        lastMicros = to_us_since_boot(get_absolute_time());
+        return;
+    }
     if (!rawValid) return;
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
 
@@ -604,4 +616,40 @@ void HMLAnalogAddon::process() {
     lightbarUpdate();
 
     lastMicros = to_us_since_boot(get_absolute_time());
+}
+
+// Gamepad-state stick source (MeisterConverter: DualSense -> USB host add-on).
+// The pair is already normalized 0..65535 by the host driver, so there is no
+// ADC scan and no hardware X inversion to undo. Everything downstream - noise
+// gate, RC filter, snapback, scale, deadzones, curve, angle, diagonal, output
+// correction - is the same code the ADS8332 path runs; only the source differs.
+//
+// calibrate() is still used: with the defaults (all zero) it falls through to a
+// plain (raw-32768)/32768 normalize, and if the user does calibrate it trims a
+// drifting DualSense center for free. Note the DualSense is an 8-bit stick
+// widened to 16 bits (center lands on 32896, one step = 257 counts), so the
+// noise gate needs a band above 257 to do anything - the real wins here are the
+// RC filter, curve and deadzones.
+void HMLAnalogAddon::processGamepadState() {
+    const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    Gamepad *gamepad = Storage::getInstance().GetGamepad();
+
+    auto runStick = [&](const HMLStickOptions& s, HMLStickState& st,
+                        uint16_t& axX, uint16_t& axY) {
+        uint16_t rx16 = axX, ry16 = axY;
+        if (s.noiseSuppress) {
+            if (!st.heldInit) { st.heldX = rx16; st.heldY = ry16; st.heldInit = true; }
+            rx16 = gateAxis(rx16, st.heldX, s.noiseX);
+            ry16 = gateAxis(ry16, st.heldY, s.noiseY);
+        }
+        float rawX = calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
+        float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
+        float outX = 0.0f, outY = 0.0f;
+        processStick(&s, st, rawX, rawY, outX, outY);
+        axX = (uint16_t)std::clamp((outX + 1.0f) * 32767.5f, 0.0f, 65535.0f);
+        axY = (uint16_t)std::clamp((outY + 1.0f) * 32767.5f, 0.0f, 65535.0f);
+    };
+
+    runStick(opts.leftStick,  leftState,  gamepad->state.lx, gamepad->state.ly);
+    runStick(opts.rightStick, rightState, gamepad->state.rx, gamepad->state.ry);
 }

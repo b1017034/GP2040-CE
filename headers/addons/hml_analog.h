@@ -72,8 +72,12 @@ private:
     float applyCurve(float mag, const void* stickOpts);
     void processStick(const void* stickOpts, HMLStickState& st, float rawX, float rawY, float& outX, float& outY);
     void emitStick(const void* stickOpts, HMLStickState& st, float x, float y, float& outX, float& outY);
+    // Stick source when the board has no ADS8332: tune whatever a USB host
+    // add-on already put in gamepad state (DualSense on the MeisterConverter)
+    void processGamepadState();
 
     ADS8332 *ads = nullptr;
+    bool adcSource = false; // true = ADS8332 sticks, false = gamepad state
     HMLStickState leftState;
     HMLStickState rightState;
     bool adcInitialized = false;
