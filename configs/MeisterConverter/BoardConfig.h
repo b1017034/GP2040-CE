@@ -55,9 +55,17 @@
 #define HML_ANALOG_RT_ADC_PIN -1
 #define HML_LIGHTBAR_ENABLED false
 
-// The point of the board is PS5, so boot straight into P5General; the dongle on
-// one of the hub ports signs every report.
-#define DEFAULT_INPUT_MODE INPUT_MODE_P5GENERAL
+// Boot into XInput, NOT P5General: P5GeneralDriver::process() returns false
+// until the dongle authenticates, so a board defaulting to P5General looks dead
+// on a PC (and on a PS5 with the dongle unplugged). XInput needs no auth, so
+// the board is always usable out of the box.
+//
+// There are no buttons here for boot-time mode selection, so mode switching is
+// the runtime combo on the host controller: hold Share+Options+face button for
+// REBOOT_HOTKEY_HOLD_TIME_MS - x = XInput, o = P5General, [] = PS4, ^ = Switch
+// (assignments live in hmlAnalogOptions.comboModeB1..B4). Share+Options+R1 gets
+// to web config the same way.
+#define DEFAULT_INPUT_MODE INPUT_MODE_XINPUT
 
 #define DEFAULT_DEBOUNCE_DELAY 5
 #define DEFAULT_USB_POLL_RATE 1000
