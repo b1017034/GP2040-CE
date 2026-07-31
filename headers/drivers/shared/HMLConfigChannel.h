@@ -35,7 +35,15 @@ constexpr uint8_t REPORT_SET = 0x60;
 constexpr uint8_t REPORT_GET = 0x61;
 // v2: REBOOT / SET_INPUT_MODE commands, INFO carries current input mode
 // v3: comboModeB1-B4 global params (Share+Options+face-button mode switch)
-constexpr uint8_t PROTOCOL_VERSION = 3;
+// 4 adds the board kind byte to INFO, the HOST selection (host controller and
+// gate-calibration state) and the calibration commands
+constexpr uint8_t PROTOCOL_VERSION = 4;
+
+// What kind of board the tool is talking to, so it can offer only what applies
+enum HMLBoardKind : uint8_t {
+    HML_BOARD_PAD = 0,        // sticks come from the on-board ADS8332
+    HML_BOARD_CONVERTER = 1,  // sticks come from a controller on the USB host
+};
 
 // Handle a SET_REPORT (feature) with report id REPORT_SET
 void handleSet(const uint8_t *buffer, uint16_t bufsize);

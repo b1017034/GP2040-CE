@@ -5,3 +5,6 @@
 	path = lib/pico_pio_usb
 	url = https://github.com/OpenStickCommunity/Pico-PIO-USB.git
 	branch = dev
+[submodule "tools/birdstrike-config"]
+	path = tools/birdstrike-config
+	url = https://github.com/asarchy/birdstrike-config.git

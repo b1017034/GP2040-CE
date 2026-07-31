@@ -9,6 +9,8 @@
 #include "events/GPStorageSaveEvent.h"
 #include "events/GPRestartEvent.h"
 #include "addons/hml_analog.h"
+#include "addons/gamepad_usb_host_listener.h"
+#include "peripheralmanager.h"
 #include "config.pb.h"
 
 namespace {
@@ -305,6 +307,17 @@ void handleSet(const uint8_t *buffer, uint16_t bufsize) {
         EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true, true));
         break;
     }
+    case 0x06: // CAL_START: begin a gate sweep for one stick
+        if (bufsize < 2) return;
+        HMLAnalogAddon::calStart(buffer[1]);
+        break;
+    case 0x07: // CAL_SAVE: store the sweep against the mounted controller
+        HMLAnalogAddon::calSave(GamepadUSBHostListener::lastMount.vid,
+                                GamepadUSBHostListener::lastMount.pid);
+        break;
+    case 0x08: // CAL_ABORT
+        HMLAnalogAddon::calAbort();
+        break;
     default:
         break;
     }
@@ -324,6 +337,11 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
         buffer[7] = (uint8_t)(sizeof(globalParams) / sizeof(globalParams[0]));
         buffer[8] = DUMP_PER_PAGE;
         buffer[9] = (uint8_t)Storage::getInstance().getGamepadOptions().inputMode;
+        // Board kind: without it the tool cannot tell a converter (whose sticks
+        // arrive from a controller on the USB host) from the pad (whose sticks
+        // are the on-board ADC), and the two need different screens.
+        buffer[10] = PeripheralManager::getInstance().isSPIEnabled(0)
+                         ? HML_BOARD_PAD : HML_BOARD_CONVERTER;
         break;
     }
     case 0x01: { // RAW: live ADC channels + processed stick output
@@ -353,6 +371,35 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
             buffer[37] = ads->hwCs ? 1 : 0;
             buffer[38] = ads->stitch ? 1 : 0;
         }
+        break;
+    }
+    case 0x04: { // HOST: controller on the USB host + gate-calibration state
+        buffer[0] = 0x04;
+        const auto &m = GamepadUSBHostListener::lastMount;
+        buffer[1] = m.seen ? 1 : 0;
+        buffer[2] = m.hid ? 1 : 0;
+        put16(buffer + 3, m.vid);
+        put16(buffer + 5, m.pid);
+        // Driver name, so an unsupported controller says why rather than just
+        // not working ("none", "busy", "auth-dongle", "generic", ...)
+        for (int i = 0; i < 12; i++)
+            buffer[7 + i] = m.driver[i] ? (uint8_t)m.driver[i] : 0;
+        buffer[19] = HMLAnalogAddon::calActive() ? 1 : 0;
+        buffer[20] = HMLAnalogAddon::calStick;
+        buffer[21] = HMLAnalogAddon::calCoverage();
+        put16(buffer + 22, HMLAnalogAddon::calCenter[0]);
+        put16(buffer + 24, HMLAnalogAddon::calCenter[1]);
+        // Untuned sticks straight off the controller, for the gate plot
+        Gamepad *live = Storage::getInstance().GetGamepad();
+        if (live != nullptr) {
+            put16(buffer + 26, live->state.lx);
+            put16(buffer + 28, live->state.ly);
+            put16(buffer + 30, live->state.rx);
+            put16(buffer + 32, live->state.ry);
+        }
+        // Sweep so far, 16 directions from up, clockwise, in 1/1000 full scale
+        for (int i = 0; i < HML_GATE_BINS; i++)
+            put16(buffer + 34 + i * 2, HMLAnalogAddon::calRadius[i]);
         break;
     }
     case 0x02: { // PARAM: single value

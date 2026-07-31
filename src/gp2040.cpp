@@ -281,6 +281,12 @@ void GP2040::run() {
 		// Pre-Process add-ons for MPGS
 		addons.PreprocessAddons();
 
+		// Gate calibration samples here, between the host add-on writing the
+		// controller's sticks and the tuning stage rewriting them, so a sweep
+		// measures the controller and not our own output. The config tool runs
+		// in this mode, so it cannot rely on the web-config loop.
+		HMLAnalogAddon::calTick();
+
 		// Drain USB host events again after the (comparatively slow) add-on
 		// reads: the dongle report round-trip needs tuh_task serviced more
 		// than once per loop to sustain one signed report per 1ms frame.
