@@ -2747,7 +2747,7 @@ std::string getHMLAnalogRaw()
     host["pid"] = m.pid;
     host["descLen"] = m.descLen;
     host["instance"] = m.instance;
-    host["driver"] = m.driver;
+    host["driver"] = GamepadUSBHostListener::driverName(m.driver);
     host["gamepadUsage"] = m.isGamepadUsage;
     host["hasXY"] = m.hasXY;
     return serialize_json(doc);

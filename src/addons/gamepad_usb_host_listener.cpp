@@ -18,6 +18,22 @@
 
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::lastMount;
 
+const char* GamepadUSBHostListener::driverName(uint8_t code) {
+    switch (code) {
+        case DRV_BUSY:         return "busy";
+        case DRV_AUTH_DONGLE:  return "auth-dongle";
+        case DRV_DS4:          return "ds4";
+        case DRV_DUALSENSE:    return "dualsense";
+        case DRV_SWITCHPRO:    return "switchpro";
+        case DRV_XBOX360:      return "xbox360";
+        case DRV_STADIA:       return "stadia";
+        case DRV_DRIVINGFORCE: return "drivingforce";
+        case DRV_ULTRASTIK360: return "ultrastik360";
+        case DRV_GENERIC:      return "generic";
+        default:               return "none";
+    }
+}
+
 // A device that only signs auth challenges and never sends inputs.
 //
 // Deliberately NOT the Sony vendor-page test PS4AuthUSBListener uses: every
@@ -83,7 +99,7 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
     // controller out. They are identified the same way PS4AuthUSBListener does
     // it - the Sony vendor page - plus the P5General dongle by VID/PID.
     if ( isAuthDongle(vid, pid, desc_report, desc_len) ) {
-        lastMount.driver = "auth-dongle";
+        lastMount.driver = DRV_AUTH_DONGLE;
         return;
     }
 
@@ -94,7 +110,7 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
     if ( _controller_host != nullptr ) {
         if ( !_host_is_generic ||
              !matchesSpecificHost(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
-            lastMount.driver = "busy";
+            lastMount.driver = DRV_BUSY;
             return;
         }
         delete _controller_host;
@@ -105,29 +121,29 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
     _host_is_generic = false;
      if ( DualshockPS4Host::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new DualshockPS4Host();
-        lastMount.driver = "ds4";
+        lastMount.driver = DRV_DS4;
     }else if ( DualsensePS5Host::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new DualsensePS5Host();
-        lastMount.driver = "dualsense";
+        lastMount.driver = DRV_DUALSENSE;
     } else if ( GoogleStadiaHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new GoogleStadiaHost();
-        lastMount.driver = "stadia";
+        lastMount.driver = DRV_STADIA;
     } else if ( DrivingForceHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new DrivingForceHost();
-        lastMount.driver = "drivingforce";
+        lastMount.driver = DRV_DRIVINGFORCE;
     } else if ( Ultrastik360Host::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new Ultrastik360Host();
-        lastMount.driver = "ultrastik360";
+        lastMount.driver = DRV_ULTRASTIK360;
     } else if ( SwitchProHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new SwitchProHost();
-        lastMount.driver = "switchpro";
+        lastMount.driver = DRV_SWITCHPRO;
     } else if ( GenericHIDHost::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         // Last resort: anything that declares itself a joystick or gamepad and
         // reports X/Y. The driver reads the report descriptor for the field
         // layout, so no VID/PID entry is needed.
         _controller_host = new GenericHIDHost();
         _host_is_generic = true;
-        lastMount.driver = "generic";
+        lastMount.driver = DRV_GENERIC;
     }
 
     // Nothing claimed it: record how far the generic parser got, which
@@ -169,7 +185,7 @@ void GamepadUSBHostListener::xmount(uint8_t dev_addr, uint8_t instance, uint8_t 
     // off the generic fallback
     if ( _controller_host != nullptr ) {
         if ( !_host_is_generic || !Xbox360Host::match(dev_addr, instance, vid, pid, controllerType) ) {
-            lastMount.driver = "busy";
+            lastMount.driver = DRV_BUSY;
             return;
         }
         delete _controller_host;
@@ -181,7 +197,7 @@ void GamepadUSBHostListener::xmount(uint8_t dev_addr, uint8_t instance, uint8_t 
     _host_is_generic = false;
     if ( Xbox360Host::match(dev_addr, instance, vid, pid, controllerType) ) {
         _controller_host = new Xbox360Host();
-        lastMount.driver = "xbox360";
+        lastMount.driver = DRV_XBOX360;
     }
     /* else if ( XboxOneHost::match(vid, pid && controllerType == 2 ) {
         _controller_host = new XboxOneHost();

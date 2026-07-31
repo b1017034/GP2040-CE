@@ -25,6 +25,16 @@ class GamepadUSBHostListener : public USBListener {
         // What the last HID mount looked like, so an unsupported controller can
         // be diagnosed from the live view instead of guessed at. driver is the
         // host driver that claimed it, or "none" when nothing matched.
+        // Which driver took the device. A code rather than a string: the
+        // config-channel report is a fixed 63 bytes and has no room for one,
+        // and indexing a short literal to a fixed width reads past its end.
+        enum HostDriver : uint8_t {
+            DRV_NONE = 0, DRV_BUSY, DRV_AUTH_DONGLE, DRV_DS4, DRV_DUALSENSE,
+            DRV_SWITCHPRO, DRV_XBOX360, DRV_STADIA, DRV_DRIVINGFORCE,
+            DRV_ULTRASTIK360, DRV_GENERIC,
+        };
+        static const char* driverName(uint8_t code);
+
         struct MountInfo {
             uint16_t vid = 0;
             uint16_t pid = 0;
@@ -32,7 +42,7 @@ class GamepadUSBHostListener : public USBListener {
             uint8_t  instance = 0;
             bool     seen = false;
             bool     hid = false;   // false = arrived via the xinput path
-            const char* driver = "none";
+            uint8_t  driver = DRV_NONE;
             // Filled in when nothing claimed it: why GenericHIDHost declined
             bool     isGamepadUsage = false;
             bool     hasXY = false;

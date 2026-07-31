@@ -376,30 +376,31 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
     case 0x04: { // HOST: controller on the USB host + gate-calibration state
         buffer[0] = 0x04;
         const auto &m = GamepadUSBHostListener::lastMount;
+        // Layout is packed to fit RESP_LEN: the sweep alone is 32 bytes, so the
+        // driver travels as a code rather than a name and the last radius must
+        // land at 54. Keep the tail in sight when adding fields here.
         buffer[1] = m.seen ? 1 : 0;
         buffer[2] = m.hid ? 1 : 0;
         put16(buffer + 3, m.vid);
         put16(buffer + 5, m.pid);
-        // Driver name, so an unsupported controller says why rather than just
-        // not working ("none", "busy", "auth-dongle", "generic", ...)
-        for (int i = 0; i < 12; i++)
-            buffer[7 + i] = m.driver[i] ? (uint8_t)m.driver[i] : 0;
-        buffer[19] = HMLAnalogAddon::calActive() ? 1 : 0;
-        buffer[20] = HMLAnalogAddon::calStick;
-        buffer[21] = HMLAnalogAddon::calCoverage();
-        put16(buffer + 22, HMLAnalogAddon::calCenter[0]);
-        put16(buffer + 24, HMLAnalogAddon::calCenter[1]);
+        buffer[7] = m.driver;
+        buffer[8] = HMLAnalogAddon::calActive() ? 1 : 0;
+        buffer[9] = HMLAnalogAddon::calStick;
+        buffer[10] = HMLAnalogAddon::calCoverage();
+        put16(buffer + 11, HMLAnalogAddon::calCenter[0]);
+        put16(buffer + 13, HMLAnalogAddon::calCenter[1]);
         // Untuned sticks straight off the controller, for the gate plot
         Gamepad *live = Storage::getInstance().GetGamepad();
         if (live != nullptr) {
-            put16(buffer + 26, live->state.lx);
-            put16(buffer + 28, live->state.ly);
-            put16(buffer + 30, live->state.rx);
-            put16(buffer + 32, live->state.ry);
+            put16(buffer + 15, live->state.lx);
+            put16(buffer + 17, live->state.ly);
+            put16(buffer + 19, live->state.rx);
+            put16(buffer + 21, live->state.ry);
         }
         // Sweep so far, 16 directions from up, clockwise, in 1/1000 full scale
+        static_assert(23 + HML_GATE_BINS * 2 <= 63, "HOST response overruns the report");
         for (int i = 0; i < HML_GATE_BINS; i++)
-            put16(buffer + 34 + i * 2, HMLAnalogAddon::calRadius[i]);
+            put16(buffer + 23 + i * 2, HMLAnalogAddon::calRadius[i]);
         break;
     }
     case 0x02: { // PARAM: single value
