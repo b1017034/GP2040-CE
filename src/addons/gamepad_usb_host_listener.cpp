@@ -18,19 +18,27 @@
 
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::lastMount;
 
-// A device whose job is signing auth challenges, not sending inputs: the PS4/
-// PS5 dongle (Sony vendor page 0xFFF0 with report 0xF3, the same test
-// PS4AuthUSBListener uses) or the P5General dongle.
+// A device that only signs auth challenges and never sends inputs.
+//
+// Deliberately NOT the Sony vendor-page test PS4AuthUSBListener uses: every
+// licensed PS4 controller carries that interface - that is what makes it usable
+// as a dongle - so keying on it would reject real DualShock 4s and third-party
+// PS4 pads as input devices. Only the P5General dongle, which is a dongle and
+// nothing else, is identified here. Dongle-vs-controller contention for the
+// single controller slot is handled by preferring specific drivers instead.
 bool GamepadUSBHostListener::isAuthDongle(uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len) {
-    if ( vid == 0x2B81 && pid == 0x0101 ) return true;   // P5General
-    if ( desc_report == nullptr || desc_len == 0 ) return false;
-    tuh_hid_report_info_t report_info[4];
-    uint8_t report_count = tuh_hid_parse_report_descriptor(report_info, 4, desc_report, desc_len);
-    for ( uint8_t i = 0; i < report_count; i++ ) {
-        if ( report_info[i].usage_page == 0xFFF0 && report_info[i].report_id == 0xF3 )
-            return true;
-    }
-    return false;
+    return ( vid == 0x2B81 && pid == 0x0101 );   // P5General
+}
+
+// Does a driver written for this exact device exist, as opposed to the generic
+// descriptor-driven fallback?
+bool GamepadUSBHostListener::matchesSpecificHost(uint8_t dev_addr, uint8_t instance, uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len) {
+    return DualshockPS4Host::match(dev_addr, instance, vid, pid, desc_report, desc_len)
+        || DualsensePS5Host::match(dev_addr, instance, vid, pid, desc_report, desc_len)
+        || GoogleStadiaHost::match(dev_addr, instance, vid, pid, desc_report, desc_len)
+        || DrivingForceHost::match(dev_addr, instance, vid, pid, desc_report, desc_len)
+        || Ultrastik360Host::match(dev_addr, instance, vid, pid, desc_report, desc_len)
+        || SwitchProHost::match(dev_addr, instance, vid, pid, desc_report, desc_len);
 }
 
 void GamepadUSBHostListener::setup() {
@@ -79,13 +87,22 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
         return;
     }
 
-    // Only host one controller at a time
+    // Only host one controller at a time. The exception is a slot held by the
+    // generic driver: a licensed dongle or stick answers the generic match too,
+    // so if it mounted first it would lock out a controller we have a real
+    // driver for. Let a specific driver take the slot from a generic one.
     if ( _controller_host != nullptr ) {
-        lastMount.driver = "busy";
-        return;
+        if ( !_host_is_generic ||
+             !matchesSpecificHost(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
+            lastMount.driver = "busy";
+            return;
+        }
+        delete _controller_host;
+        _controller_host = nullptr;
     }
 
     _controller_host = nullptr;
+    _host_is_generic = false;
      if ( DualshockPS4Host::match(dev_addr, instance, vid, pid, desc_report, desc_len) ) {
         _controller_host = new DualshockPS4Host();
         lastMount.driver = "ds4";
@@ -109,6 +126,7 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
         // reports X/Y. The driver reads the report descriptor for the field
         // layout, so no VID/PID entry is needed.
         _controller_host = new GenericHIDHost();
+        _host_is_generic = true;
         lastMount.driver = "generic";
     }
 
@@ -147,14 +165,20 @@ void GamepadUSBHostListener::xmount(uint8_t dev_addr, uint8_t instance, uint8_t 
     lastMount.pid = pid;
     lastMount.instance = instance;
 
-    // Only host one controller at a time
+    // As in mount(): an XInput pad has a real driver, so it may take the slot
+    // off the generic fallback
     if ( _controller_host != nullptr ) {
-        lastMount.driver = "busy";
-        return;
+        if ( !_host_is_generic || !Xbox360Host::match(dev_addr, instance, vid, pid, controllerType) ) {
+            lastMount.driver = "busy";
+            return;
+        }
+        delete _controller_host;
+        _controller_host = nullptr;
     }
 
     // Match is a static function, setup and init happens after we've established something
     _controller_host = nullptr;
+    _host_is_generic = false;
     if ( Xbox360Host::match(dev_addr, instance, vid, pid, controllerType) ) {
         _controller_host = new Xbox360Host();
         lastMount.driver = "xbox360";
@@ -182,6 +206,7 @@ void GamepadUSBHostListener::unmount(uint8_t dev_addr) {
     _controller_host->shutdown();
     delete _controller_host;
     _controller_host = nullptr;
+    _host_is_generic = false;
 }
 
 void GamepadUSBHostListener::report_received(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {

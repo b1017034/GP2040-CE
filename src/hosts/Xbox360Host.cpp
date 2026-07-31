@@ -2,16 +2,13 @@
 #include "drivers/shared/xinput_host.h"
 #include <storagemanager.h>
 
-bool Xbox360Host::match(uint8_t dev_addr, uint8_t instance, uint16_t vendor_id, uint16_t product_id, uint8_t controller_type) {    
-    if ( controller_type == 1 ) {    
-        if ( vendor_id == 0x045E ) {
-            switch(product_id) {
-                case 0x028E:
-                    return true;
-            }
-        }
-    }
-    return false;
+bool Xbox360Host::match(uint8_t dev_addr, uint8_t instance, uint16_t vendor_id, uint16_t product_id, uint8_t controller_type) {
+    // Any device the XInput host driver identified as XBOX360, whatever the
+    // VID/PID. Matching Microsoft's 045E:028E alone excluded every third-party
+    // XInput pad, and there is nothing to gain from the narrower test: XInput
+    // is one fixed protocol, so a device the host driver already classified as
+    // XBOX360 speaks exactly the report format this driver decodes.
+    return ( controller_type == XBOX360 );
 }
 
 void Xbox360Host::initialize(uint8_t dev_addr, uint8_t instance, uint16_t vendor_id, uint16_t product_id, uint8_t const* desc_report, uint16_t desc_len) {

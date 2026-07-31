@@ -42,10 +42,13 @@ class GamepadUSBHostListener : public USBListener {
         // True for PS4/PS5 and P5General auth dongles, which must not be
         // mistaken for the input controller
         static bool isAuthDongle(uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len);
+        // True when a purpose-written driver covers this device
+        static bool matchesSpecificHost(uint8_t dev_addr, uint8_t instance, uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len);
     private:
         uint8_t _controller_dev_addr;
         uint8_t _controller_instance;
         GPHost * _controller_host;
+        bool _host_is_generic = false;
         uint32_t _next_update;
 };
 

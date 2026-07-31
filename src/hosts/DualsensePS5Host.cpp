@@ -5,10 +5,32 @@ bool DualsensePS5Host::match(uint8_t dev_addr, uint8_t instance, uint16_t vendor
     if ( vendor_id == 0x054c) {
         switch(product_id) {
             case 0x0CE6:               // DualSense
+            case 0x0DF2:               // DualSense Edge
                 return true;
         }
     }
-    
+
+    // Third-party DualSense-protocol pads that send the same report 0x01
+    if ( vendor_id == 0x0F0D ) {       // Hori
+        switch(product_id) {
+            case 0x0184:               // Fighting Commander OCTA for PS5
+            case 0x0192:               // Fighting Stick alpha for PS5
+                return true;
+        }
+    }
+    if ( vendor_id == 0x1532 ) {       // Razer
+        switch(product_id) {
+            case 0x100B:               // Kitsune for PS5
+                return true;
+        }
+    }
+    if ( vendor_id == 0x0C12 ) {       // Zeroplus / Victrix
+        switch(product_id) {
+            case 0x1E3A:               // Victrix Pro FS for PS5
+                return true;
+        }
+    }
+
     return false;
 }
 
