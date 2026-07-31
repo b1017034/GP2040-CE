@@ -32,6 +32,9 @@ struct HIDLayout {
     uint8_t  buttonCount  = 0;
     uint8_t  reportId     = 0;     // 0 = reports are not ID-prefixed
     bool     isGamepad    = false; // top-level usage was Joystick or Gamepad
+    // Licensed PS4-class pad: buttons are ordered Square, Cross, Circle,
+    // Triangle rather than the A, B, X, Y a PC pad reports
+    bool     sonyLayout   = false;
 };
 
 class GenericHIDHost : public GPHost {

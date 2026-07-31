@@ -47,6 +47,11 @@ class GamepadUSBHostListener : public USBListener {
             bool     isGamepadUsage = false;
             bool     hasXY = false;
         };
+        // The controller actually in use. lastMount is only the most recent
+        // mount *attempt* - on a device that exposes several HID interfaces the
+        // later ones are correctly rejected as busy, and reporting that as the
+        // state made a working controller look broken.
+        static MountInfo active;
         static MountInfo lastMount;
 
         // True for PS4/PS5 and P5General auth dongles, which must not be

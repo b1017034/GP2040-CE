@@ -5,6 +5,7 @@
 // HID usage pages / usages we care about
 #define HID_UP_GENERIC_DESKTOP 0x01
 #define HID_UP_BUTTON          0x09
+#define HID_UP_SONY_AUTH       0xFFF0  // vendor page every licensed PS4 pad carries
 #define HID_USAGE_JOYSTICK     0x04
 #define HID_USAGE_GAMEPAD      0x05
 #define HID_USAGE_X            0x30
@@ -87,7 +88,15 @@ bool GenericHIDHost::parseDescriptor(uint8_t const* desc, uint16_t len, HIDLayou
 
         if (bType == 1) {            // Global
             switch (bTag) {
-                case 0x0: usagePage = (uint16_t)uval; break;
+                case 0x0:
+                    usagePage = (uint16_t)uval;
+                    // The Sony authentication page only appears on licensed
+                    // PS4-class devices, which is exactly the set that orders
+                    // its face buttons Square/Cross/Circle/Triangle. Keying on
+                    // it keeps this a property of the protocol rather than a
+                    // list of product IDs.
+                    if (usagePage == HID_UP_SONY_AUTH) out.sonyLayout = true;
+                    break;
                 case 0x1: logMin = sval; break;
                 case 0x2: logMax = sval; break;
                 case 0x7: reportSize = uval; break;
@@ -213,13 +222,22 @@ void GenericHIDHost::process(uint8_t const* report, uint16_t len) {
         if (layout.axis[4].valid) _controller_host_state.rt = (uint8_t)(readAxis(report, len, layout.axis[4]) >> 8);
     }
 
-    // Buttons, in the order PC gamepads conventionally report them
-    static const uint16_t BUTTON_MAP[GENERIC_HID_MAX_BUTTONS] = {
+    // Face-button order differs by family: a PC pad reports A, B, X, Y while a
+    // PS4-class pad reports Square, Cross, Circle, Triangle. Getting this wrong
+    // permutes three of the four face buttons.
+    static const uint16_t BUTTON_MAP_PC[GENERIC_HID_MAX_BUTTONS] = {
         GAMEPAD_MASK_B1, GAMEPAD_MASK_B2, GAMEPAD_MASK_B3, GAMEPAD_MASK_B4,
         GAMEPAD_MASK_L1, GAMEPAD_MASK_R1, GAMEPAD_MASK_L2, GAMEPAD_MASK_R2,
         GAMEPAD_MASK_S1, GAMEPAD_MASK_S2, GAMEPAD_MASK_L3, GAMEPAD_MASK_R3,
         GAMEPAD_MASK_A1, GAMEPAD_MASK_A2, 0, 0,
     };
+    static const uint16_t BUTTON_MAP_SONY[GENERIC_HID_MAX_BUTTONS] = {
+        GAMEPAD_MASK_B3, GAMEPAD_MASK_B1, GAMEPAD_MASK_B2, GAMEPAD_MASK_B4,
+        GAMEPAD_MASK_L1, GAMEPAD_MASK_R1, GAMEPAD_MASK_L2, GAMEPAD_MASK_R2,
+        GAMEPAD_MASK_S1, GAMEPAD_MASK_S2, GAMEPAD_MASK_L3, GAMEPAD_MASK_R3,
+        GAMEPAD_MASK_A1, GAMEPAD_MASK_A2, 0, 0,
+    };
+    const uint16_t* BUTTON_MAP = layout.sonyLayout ? BUTTON_MAP_SONY : BUTTON_MAP_PC;
     _controller_host_state.buttons = 0;
     for (uint8_t n = 0; n < layout.buttonCount; n++) {
         if (extractBits(report, len, (uint16_t)(layout.buttonOffset + n), 1))

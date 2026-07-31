@@ -375,7 +375,10 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
     }
     case 0x04: { // HOST: controller on the USB host + gate-calibration state
         buffer[0] = 0x04;
-        const auto &m = GamepadUSBHostListener::lastMount;
+        // Report the controller in use, falling back to the last attempt so a
+        // rejected device still explains itself
+        const auto &a = GamepadUSBHostListener::active;
+        const auto &m = a.seen ? a : GamepadUSBHostListener::lastMount;
         // Layout is packed to fit RESP_LEN: the sweep alone is 32 bytes, so the
         // driver travels as a code rather than a name and the last radius must
         // land at 54. Keep the tail in sight when adding fields here.

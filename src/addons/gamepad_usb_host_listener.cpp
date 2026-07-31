@@ -17,6 +17,7 @@
 */
 
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::lastMount;
+GamepadUSBHostListener::MountInfo GamepadUSBHostListener::active;
 
 const char* GamepadUSBHostListener::driverName(uint8_t code) {
     switch (code) {
@@ -159,6 +160,7 @@ void GamepadUSBHostListener::mount(uint8_t dev_addr, uint8_t instance, uint8_t c
         _controller_dev_addr = dev_addr;
         _controller_instance = instance;
         _controller_host->initialize(dev_addr, instance, vid, pid, desc_report, desc_len);
+        active = lastMount;
     } else { 
         // send message to the main screen that we have an unknown controller
         
@@ -207,7 +209,8 @@ void GamepadUSBHostListener::xmount(uint8_t dev_addr, uint8_t instance, uint8_t 
         _controller_dev_addr = dev_addr;
         _controller_instance = instance;
         _controller_host->initialize(dev_addr, instance, vid, pid, nullptr, 0);
-    } else { 
+        active = lastMount;
+    } else {
         // send message to the main screen that we have an unknown controller
 
         // if auto-magic
@@ -223,6 +226,7 @@ void GamepadUSBHostListener::unmount(uint8_t dev_addr) {
     delete _controller_host;
     _controller_host = nullptr;
     _host_is_generic = false;
+    active = MountInfo();
 }
 
 void GamepadUSBHostListener::report_received(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {

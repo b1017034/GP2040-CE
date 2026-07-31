@@ -425,8 +425,18 @@ void HMLAnalogAddon::emitStick(const void* stickOptsV, HMLStickState& st, float 
             dy = st.dlyY[idx];
             found = true;
         }
+        // Nothing old enough yet. Fall back to the oldest sample held rather
+        // than zero: the ring is 40 slots, so at loop rate it only spans about
+        // 40ms, and any larger delay used to pin the stick to centre for as
+        // long as the setting stayed - which reads as the pad going dead until
+        // a reboot reloads the saved value.
+        if (!found && st.dlyCount > 0) {
+            uint8_t idx = (st.dlyHead + HML_DELAY_SLOTS - st.dlyCount) % HML_DELAY_SLOTS;
+            dx = st.dlyX[idx];
+            dy = st.dlyY[idx];
+            found = true;
+        }
         if (found) { x = dx; y = dy; }
-        else { x = 0.0f; y = 0.0f; } // buffer not old enough yet
     }
     outX = x;
     outY = y;

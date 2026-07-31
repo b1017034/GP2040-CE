@@ -2739,7 +2739,8 @@ std::string getHMLAnalogRaw()
     // What the USB host actually saw on the last controller mount. "seen"
     // false means the USB stack never handed us the device at all, which is a
     // different fault from a device we were handed and declined.
-    const auto& m = GamepadUSBHostListener::lastMount;
+    const auto& a = GamepadUSBHostListener::active;
+    const auto& m = a.seen ? a : GamepadUSBHostListener::lastMount;
     JsonObject host = doc.createNestedObject("hostMount");
     host["seen"] = m.seen;
     host["hid"] = m.hid;
@@ -2779,7 +2780,8 @@ std::string getHMLCalStatus()
     doc["centerY"] = HMLAnalogAddon::calCenter[1];
     JsonArray r = doc.createNestedArray("radius");
     for (int i = 0; i < HML_GATE_BINS; i++) r.add(HMLAnalogAddon::calRadius[i]);
-    const auto& m = GamepadUSBHostListener::lastMount;
+    const auto& a = GamepadUSBHostListener::active;
+    const auto& m = a.seen ? a : GamepadUSBHostListener::lastMount;
     doc["vid"] = m.vid;
     doc["pid"] = m.pid;
     return serialize_json(doc);
@@ -2787,7 +2789,8 @@ std::string getHMLCalStatus()
 
 std::string setHMLCalSave()
 {
-    const auto& m = GamepadUSBHostListener::lastMount;
+    const auto& a = GamepadUSBHostListener::active;
+    const auto& m = a.seen ? a : GamepadUSBHostListener::lastMount;
     bool ok = m.seen && HMLAnalogAddon::calSave(m.vid, m.pid);
     DynamicJsonDocument res(JSON_OBJECT_SIZE(8));
     res["saved"] = ok;
