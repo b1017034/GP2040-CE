@@ -87,7 +87,6 @@ void DualshockPS4Host::initialize(uint8_t dev_addr, uint8_t instance, uint16_t v
     _controller_host_state.rx = GAMEPAD_JOYSTICK_MID;
     _controller_host_state.ry = GAMEPAD_JOYSTICK_MID;
 
-    memset(&prevReport, 0, sizeof(PS4Report));
     memset(&last_controller_output, 0, sizeof(PS4FeatureOutputReport));
 
     tuh_hid_send_report(_dev_addr, _instance, PS4AuthReport::PS4_DEFINITION, &report_buffer, 64);
@@ -137,7 +136,17 @@ void DualshockPS4Host::process(uint8_t const* report, uint16_t len) {
     if (report[0] == 1) {
         memcpy(&controller_report, report, sizeof(controller_report));
 
-        if ( diff_report(&prevReport, &controller_report) ) {
+        // Take every report, exactly as DualsensePS5Host does. Upstream gated
+        // this on diff_report(), whose diff_than_2() only let a stick through
+        // once it had moved 3+ counts from the previous report - and since
+        // prevReport was refreshed unconditionally, a stick creeping 1-2 counts
+        // per report never updated at all. That is a ~1.6% dead band on a pad
+        // whose counts are already widened 257x, and it hands the HMLAnalog RC
+        // filter a staircase: the rcAdvanced velocity term reads (0,0,3) where
+        // the DualSense reads (1,1,1), so the two pads filter differently.
+        // Suppressing genuine jitter is the noise gate's job (gateAxis), where
+        // the band is measured and configurable.
+        {
             _controller_host_state.lx = map(controller_report.leftStickX, 0,255,GAMEPAD_JOYSTICK_MIN,GAMEPAD_JOYSTICK_MAX);
             _controller_host_state.ly = map(controller_report.leftStickY, 0,255,GAMEPAD_JOYSTICK_MIN,GAMEPAD_JOYSTICK_MAX);
             _controller_host_state.rx = map(controller_report.rightStickX,0,255,GAMEPAD_JOYSTICK_MIN,GAMEPAD_JOYSTICK_MAX);
@@ -171,9 +180,6 @@ void DualshockPS4Host::process(uint8_t const* report, uint16_t len) {
             if (controller_report.dpad == PS4_HAT_LEFT) _controller_host_state.dpad |= GAMEPAD_MASK_LEFT;
             if (controller_report.dpad == PS4_HAT_UPLEFT) _controller_host_state.dpad |= GAMEPAD_MASK_LEFT | GAMEPAD_MASK_UP;
         }
-        
-        // Save report to previous
-        memcpy(&prevReport, &controller_report, sizeof(PS4Report));
     }
 }
 
@@ -194,23 +200,4 @@ void DualshockPS4Host::gamepad(Gamepad * gamepad) {
 
 uint32_t DualshockPS4Host::map(uint32_t x, uint32_t in_min, uint32_t in_max, uint32_t out_min, uint32_t out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-//check if different than 2
-bool DualshockPS4Host::diff_than_2(uint8_t x, uint8_t y) {
-    return (x - y > 2) || (y - x > 2);
-}
-
-// check if 2 reports are different enough
-bool DualshockPS4Host::diff_report(PS4Report const* rpt1, PS4Report const* rpt2) {
-    bool result;
-
-    // x, y, z, rz must different than 2 to be counted
-    result = diff_than_2(rpt1->leftStickX, rpt2->leftStickX) || diff_than_2(rpt1->leftStickY, rpt2->leftStickY) ||
-            diff_than_2(rpt1->rightStickX, rpt2->rightStickX) || diff_than_2(rpt1->rightStickY, rpt2->rightStickY);
-
-    // check the rest with mem compare
-    result |= memcmp(&rpt1->rightStickY + 1, &rpt2->rightStickY + 1, sizeof(PS4Report)-6);
-
-    return result;
 }
