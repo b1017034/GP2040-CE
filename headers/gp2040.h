@@ -39,6 +39,11 @@ private:
         void process(Gamepad* gamepad, bool configMode);
 
         bool active;
+        // The mode combo hands the save and the reboot to checkSaveRebootState
+        // and keeps running while the buttons are still held, so it has to fire
+        // only once - re-requesting the reboot every loop would push its delay
+        // out for as long as the combo is down.
+        bool comboActionTaken;
 
         absolute_time_t noButtonsPressedTimeout;
         uint16_t webConfigHotkeyMask;

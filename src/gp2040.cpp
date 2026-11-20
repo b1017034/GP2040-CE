@@ -496,6 +496,7 @@ GP2040::BootAction GP2040::getGpioMappedBootAction() {
 
 GP2040::RebootHotkeys::RebootHotkeys() :
 	active(false),
+	comboActionTaken(false),
 	noButtonsPressedTimeout(nil_time),
 	webConfigHotkeyMask(GAMEPAD_MASK_S1 | GAMEPAD_MASK_S2 | GAMEPAD_MASK_R1), // Share+Options+R1, GNS-style
 	bootselHotkeyMask(GAMEPAD_MASK_S1 | GAMEPAD_MASK_B3 | GAMEPAD_MASK_B4),
@@ -542,13 +543,28 @@ void GP2040::RebootHotkeys::process(Gamepad* gamepad, bool configMode) {
 					System::reboot(configMode ? System::BootMode::GAMEPAD : System::BootMode::WEBCONFIG);
 				} else if (btn == bootselHotkeyMask) {
 					System::reboot(System::BootMode::USB);
-				} else if (comboActive) {
+				} else if (comboActive && !comboActionTaken) {
+					comboActionTaken = true;
 					GamepadOptions& gamepadOptions = Storage::getInstance().getGamepadOptions();
-					if (gamepadOptions.inputMode != (InputMode)comboMode) {
-						gamepadOptions.inputMode = (InputMode)comboMode;
-						Storage::getInstance().save(true);
-					}
-					System::reboot(System::BootMode::GAMEPAD);
+					gamepadOptions.inputMode = (InputMode)comboMode;
+					// Save and reboot have to go through checkSaveRebootState,
+					// not Storage::save() + System::reboot() inline. FlashPROM's
+					// commit() does not write flash: it schedules an alarm
+					// EEPROM_WRITE_WAIT (50ms) out, and writeToFlash() does the
+					// real erase/program from that callback. Resetting the chip
+					// in the same breath killed the alarm before it ever fired,
+					// so the new mode was never persisted and the board came
+					// back up on whatever was already in flash. The event path
+					// (what the config tool's mode switch uses, and why that one
+					// worked) holds the reboot for rebootDelayMs = 500ms.
+					//
+					// Order matters: the save handler resets rebootMode to
+					// DEFAULT, so the restart event has to come second to pin it
+					// back to GAMEPAD. DEFAULT would fall through to the
+					// boot-time GPIO/button mode scan instead of honouring the
+					// mode we just stored.
+					EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true, true));
+					EventManager::getInstance().triggerEvent(new GPRestartEvent(System::BootMode::GAMEPAD));
 				}
 			}
 		} else {
