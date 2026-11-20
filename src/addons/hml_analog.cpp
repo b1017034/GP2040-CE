@@ -69,6 +69,7 @@ void HMLAnalogAddon::setup() {
     lightbarSetup();
 
     lastMicros = to_us_since_boot(get_absolute_time());
+    lastSampleMicros = lastMicros;
 }
 
 // One WS2812 lightbar showing a fixed user-configured color. This avoids the
@@ -290,7 +291,12 @@ static float applyAngleMap(const HMLStickOptions& s, float ang) {
 //         the console's 8-bit output quantization, response stays crisp)
 // R < 0:  B = -R; base low-pass with w = 200 at 1kHz, then a velocity lead
 //         term (B+25)/25 per sample fed back into the state
-static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength, float dtMs) {
+//
+// lead is the input delta the velocity term acts on. Stock FireBird uses the
+// raw per-frame delta because every frame carries a fresh sample; where the
+// source is slower than the loop the caller passes a held, rate-normalized
+// delta instead, so the boost is continuous rather than a one-frame spike.
+static float rcFilterAxis(float raw, float lead, float& filt, float strength, float dtMs) {
     if (strength > 0.5f) {
         float q = 100.0f / dtMs;
         filt += (raw - filt) * q / (q + strength);
@@ -298,7 +304,7 @@ static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength,
         float b = -strength;
         float w = 200.0f / dtMs;
         float smoothed = (raw * w + filt * b) / (w + b);
-        filt = smoothed + (raw - prevRaw) * (b + 25.0f) / 25.0f;
+        filt = smoothed + lead * (b + 25.0f) / 25.0f;
         if (filt > 1.25f) filt = 1.25f;
         if (filt < -1.25f) filt = -1.25f;
     } else {
@@ -307,7 +313,8 @@ static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength,
     return filt;
 }
 
-void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, float rawX, float rawY, float& outX, float& outY) {
+void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, float rawX, float rawY, float& outX, float& outY,
+                                  float sampleDtMs, bool newSample, float leadScale) {
     const HMLStickOptions& s = *(const HMLStickOptions*)stickOptsV;
 
     if (s.invertX) rawX = -rawX;
@@ -317,23 +324,38 @@ void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, flo
     float dtMs = (nowUs - lastMicros) / 1000.0f;
     if (dtMs < 0.1f) dtMs = 0.1f;
     if (dtMs > 10.0f) dtMs = 10.0f;
+    // <=0 means "the source keeps up with the loop" (ADS8332): sample interval
+    // and loop interval are the same thing, and leadScale 1.0 then reproduces
+    // stock FireBird's per-frame delta exactly.
+    if (sampleDtMs <= 0.0f) sampleDtMs = dtMs;
+
+    // Refresh the derivative terms only when the source produced a new value,
+    // and hold them until the next one. Recomputing every loop against a
+    // repeated sample is what made the velocity curve read 0 on three frames
+    // out of four and then overshoot on the fourth.
+    if (newSample) {
+        st.dRawX = rawX - st.prevRawX;
+        st.dRawY = rawY - st.prevRawY;
+        st.dRawDtMs = sampleDtMs;
+        st.leadX = st.dRawX * leadScale;
+        st.leadY = st.dRawY * leadScale;
+        st.prevRawX = rawX;
+        st.prevRawY = rawY;
+    }
 
     // RC filter parameters
     float strength = (float)s.rcFilterStrength;
     if (s.rcAdvanced) {
         float velMult = (s.rcVelocityMult100 > 0 ? s.rcVelocityMult100 : 100) / 100.0f;
-        float dx = rawX - st.prevRawX;
-        float dy = rawY - st.prevRawY;
-        float vel = sqrtf(dx*dx + dy*dy) / dtMs;   // normalized units per ms
+        float dx = st.dRawX, dy = st.dRawY;
+        float vel = sqrtf(dx*dx + dy*dy) / st.dRawDtMs;   // normalized units per ms
         float vel128 = vel * 64.0f * velMult;
         if (vel128 > 128.0f) vel128 = 128.0f;
         strength = rcStrengthForVelocity(s, vel128);
     }
 
-    float fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, dtMs);
-    float fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, dtMs);
-    st.prevRawX = rawX;
-    st.prevRawY = rawY;
+    float fx = rcFilterAxis(rawX, st.leadX, st.filtX, strength, dtMs);
+    float fy = rcFilterAxis(rawY, st.leadY, st.filtY, strength, dtMs);
 
     // Snapback filter: damp only the return-to-center phase (approximation of
     // FireBird's snapback filter; strength 0 = off)
@@ -584,7 +606,7 @@ void HMLAnalogAddon::process() {
         // the source: with "X軸反転" OFF, right = +X (invert flag then optional)
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
-        processStick(&s, leftState, rawX, rawY, lx, ly);
+        processStick(&s, leftState, rawX, rawY, lx, ly, 0.0f, true, 1.0f);
         gamepad->state.lx = (uint16_t)std::clamp((lx + 1.0f) * 32767.5f, 0.0f, 65535.0f);
         gamepad->state.ly = (uint16_t)std::clamp((ly + 1.0f) * 32767.5f, 0.0f, 65535.0f);
     }
@@ -598,7 +620,7 @@ void HMLAnalogAddon::process() {
         }
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
-        processStick(&s, rightState, rawX, rawY, rx, ry);
+        processStick(&s, rightState, rawX, rawY, rx, ry, 0.0f, true, 1.0f);
         gamepad->state.rx = (uint16_t)std::clamp((rx + 1.0f) * 32767.5f, 0.0f, 65535.0f);
         gamepad->state.ry = (uint16_t)std::clamp((ry + 1.0f) * 32767.5f, 0.0f, 65535.0f);
     }
@@ -891,6 +913,26 @@ void HMLAnalogAddon::processGamepadState() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
 
+    // The sticks here only change when the controller sends a report (~250 Hz
+    // on a DualSense or a DS4), while this runs at loop rate. Time the
+    // derivative terms off the report clock, not the loop clock, or the
+    // velocity curve and the velocity-lead term see a 4x burst on one frame in
+    // four and nothing on the rest. leadScale converts the per-report delta to
+    // the 1 kHz per-frame delta FireBird's constants were derived against.
+    uint32_t nowUs = to_us_since_boot(get_absolute_time());
+    uint32_t tick = GamepadUSBHostListener::sampleTick;
+    bool newSample = (tick != lastSampleTick);
+    float sampleDtMs = (nowUs - lastSampleMicros) / 1000.0f;
+    // A stationary controller still reports, so a long gap means the pad just
+    // arrived (or stalled); clamping keeps that from reading as zero velocity
+    // forever on one side and a divide-by-nothing spike on the other.
+    if (sampleDtMs < 0.1f) sampleDtMs = 0.1f;
+    if (sampleDtMs > 50.0f) sampleDtMs = 50.0f;
+    if (newSample) {
+        lastSampleTick = tick;
+        lastSampleMicros = nowUs;
+    }
+
     auto runStick = [&](const HMLStickOptions& s, HMLStickState& st,
                         uint16_t& axX, uint16_t& axY, uint8_t stickIndex) {
         uint16_t rx16 = axX, ry16 = axY;
@@ -907,7 +949,7 @@ void HMLAnalogAddon::processGamepadState() {
             rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
         }
         float outX = 0.0f, outY = 0.0f;
-        processStick(&s, st, rawX, rawY, outX, outY);
+        processStick(&s, st, rawX, rawY, outX, outY, sampleDtMs, newSample, 1.0f / sampleDtMs);
         axX = (uint16_t)std::clamp((outX + 1.0f) * 32767.5f, 0.0f, 65535.0f);
         axY = (uint16_t)std::clamp((outY + 1.0f) * 32767.5f, 0.0f, 65535.0f);
     };

@@ -52,6 +52,20 @@ struct HMLStickState {
     float filtY = 0.0f;
     float prevRawX = 0.0f;
     float prevRawY = 0.0f;
+    // Derivative terms, refreshed on a new input sample and held in between.
+    // The stick source can be slower than the add-on loop (a USB controller
+    // reports at ~250 Hz), and recomputing these against a repeated sample
+    // yields zero velocity on every frame but one, then a burst on that frame.
+    // dRawX/dRawY are the raw delta and dRawDtMs the interval it spans, kept
+    // unreduced so the velocity magnitude is still computed as
+    // sqrt(dx*dx+dy*dy)/dt - dividing first would change the rounding, and the
+    // ADS8332 path has to stay numerically identical to before. leadX/leadY
+    // are what the FireBird velocity-lead term consumes, in its per-frame units.
+    float dRawX = 0.0f;
+    float dRawY = 0.0f;
+    float dRawDtMs = 1.0f;
+    float leadX = 0.0f;
+    float leadY = 0.0f;
     // snapback filter state (return-phase low-pass)
     float snapX = 0.0f;
     float snapY = 0.0f;
@@ -119,7 +133,11 @@ public:
 private:
     float calibrate(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_t mx);
     float applyCurve(float mag, const void* stickOpts);
-    void processStick(const void* stickOpts, HMLStickState& st, float rawX, float rawY, float& outX, float& outY);
+    // sampleDtMs/newSample/leadScale describe the *input sample* rate, which is
+    // the loop rate on the ADS8332 path but the controller's report rate on the
+    // gamepad-state path. See the derivative-term comment in HMLStickState.
+    void processStick(const void* stickOpts, HMLStickState& st, float rawX, float rawY, float& outX, float& outY,
+                      float sampleDtMs, bool newSample, float leadScale);
     void emitStick(const void* stickOpts, HMLStickState& st, float x, float y, float& outX, float& outY);
     // Stick source when the board has no ADS8332: tune whatever a USB host
     // add-on already put in gamepad state (DualSense on the MeisterConverter)
@@ -131,6 +149,9 @@ private:
     HMLStickState rightState;
     bool adcInitialized = false;
     uint32_t lastMicros = 0;
+    // Input-sample clock for the gamepad-state path (see processStick)
+    uint32_t lastSampleTick = 0;
+    uint32_t lastSampleMicros = 0;
     // Self-heal: retry ADC link bring-up (a warm reboot can leave the chip
     // desynced and the first probe may fail)
     uint32_t adsRetryMs = 0;

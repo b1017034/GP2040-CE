@@ -18,6 +18,7 @@
 
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::lastMount;
 GamepadUSBHostListener::MountInfo GamepadUSBHostListener::active;
+uint32_t GamepadUSBHostListener::sampleTick = 0;
 
 const char* GamepadUSBHostListener::driverName(uint8_t code) {
     switch (code) {
@@ -230,11 +231,12 @@ void GamepadUSBHostListener::unmount(uint8_t dev_addr) {
 }
 
 void GamepadUSBHostListener::report_received(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
-    if ( _controller_host != nullptr && 
+    if ( _controller_host != nullptr &&
         _controller_dev_addr == dev_addr &&
         _controller_instance == instance ) {
         _controller_host->process(report, len);
-    } 
+        sampleTick++;
+    }
 }
 
 void GamepadUSBHostListener::set_report_complete(uint8_t dev_addr, uint8_t instance, uint8_t report_id, uint8_t report_type, uint16_t len) {

@@ -54,6 +54,13 @@ class GamepadUSBHostListener : public USBListener {
         static MountInfo active;
         static MountInfo lastMount;
 
+        // Bumped every time a report reaches the active controller driver, i.e.
+        // every time the sticks in gamepad state can actually have changed.
+        // HMLAnalog needs this: its stick source updates at the controller's
+        // report rate (~250 Hz) while the add-on chain runs at loop rate, and
+        // the FireBird velocity terms are only meaningful per input sample.
+        static uint32_t sampleTick;
+
         // True for PS4/PS5 and P5General auth dongles, which must not be
         // mistaken for the input controller
         static bool isAuthDongle(uint16_t vid, uint16_t pid, uint8_t const* desc_report, uint16_t desc_len);
