@@ -66,13 +66,13 @@
 #define HML_TRIGGER_DIGITAL_PERCENT 40
 
 // Boot combos: hold button while plugging in to select input mode
-// B2 (right face) = XInput, B4 (top face) = PS4, R2 = P5 General (PS5)
-#define DEFAULT_INPUT_MODE_R2 INPUT_MODE_P5GENERAL
+// B2 (right face) = XInput, B4 (top face) = PS4, R2 = PS5 (P5General dongle)
+#define DEFAULT_INPUT_MODE_R2 INPUT_MODE_PS5
 
 // USB host port for the PS5 auth dongle (VID 0x2B81 PID 0x0101), wiring taken
 // from stock GNS firmware defaults: D+ = GPIO6, D- = GPIO7, no 5V enable pin.
-// P5General mode signs every report through the dongle, so without this the
-// mode sends nothing at all.
+// PS5 mode signs every report through the dongle; without it the console
+// never authenticates the controller.
 #define USB_PERIPHERAL_ENABLED 1
 #define USB_PERIPHERAL_PIN_DPLUS 6
 #define USB_PERIPHERAL_PIN_ORDER 0
@@ -80,10 +80,9 @@
 // Lightbar RGB LED = a single WS2812 on GPIO20 (from stock GNS firmware config
 // defaults: ledOptions.dataPin=20). We drive it through a dedicated HML path
 // (HMLAnalogAddon), NOT the generic NeoPico/player-LED addon, because that path
-// zeroes the lightbar via the player-LED level + animation-brightness gates and
-// its ws2812 lands on pio0/sm0 which the PS5 dongle's Pico-PIO-USB host already
-// claims for TX. The dedicated path uses pio1/sm1 (USB uses pio0/sm0 + pio1/sm0)
-// and reads the console-sent color straight out of auxState.statusLight.
+// zeroes the lightbar via the player-LED level + animation-brightness gates.
+// The dedicated path uses pio1/sm1 (the Pico-PIO-USB host for the PS5 dongle
+// owns pio0/sm0-2) and shows the user-configured lightbarColor.
 #define HML_LIGHTBAR_ENABLED true
 #define HML_LIGHTBAR_PIN 20
 #define HML_LIGHTBAR_BRIGHTNESS 128

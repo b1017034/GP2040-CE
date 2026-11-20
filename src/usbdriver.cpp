@@ -44,7 +44,7 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
 		HMLConfigChannel::handleSet(buffer, bufsize);
 		return;
 	}
-	DriverManager::getInstance().getDriver()->set_report(report_id, report_type, buffer, bufsize);
+	DriverManager::getInstance().getDriver()->set_report_n(itf, report_id, report_type, buffer, bufsize);
 }
 
 // Invoked when device is mounted
@@ -102,6 +102,11 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
 	return DriverManager::getInstance().getDriver()->get_hid_descriptor_report_cb(itf);
 }
 
+// INPUT_MODE_P5GENERAL is a legacy alias that now runs the unified PS5 mode
+static bool isPS5Mode(InputMode mode) {
+	return mode == INPUT_MODE_PS5 || mode == INPUT_MODE_P5GENERAL;
+}
+
 // Rewrite the interrupt IN endpoint bInterval on interface 0 (the gamepad data
 // interface in every driver) to match the configured USB poll rate. Descriptors
 // are const flash arrays, so patch a RAM copy.
@@ -111,9 +116,10 @@ static uint8_t const *applyUsbPollRate(uint8_t const *desc) {
 	if (desc == nullptr || DriverManager::getInstance().isConfigMode())
 		return desc;
 
-	// P5General must present the byte-exact stock GNS dongle descriptor to the
-	// PS5 - no bInterval patching in that mode
-	if (DriverManager::getInstance().getInputMode() == INPUT_MODE_P5GENERAL)
+	// PS5 mode presents a DualSense-compatible (composite, audio first)
+	// identity that the console checks strictly, and may fall back to the PS4
+	// path - leave its descriptors untouched
+	if (isPS5Mode(DriverManager::getInstance().getInputMode()))
 		return desc;
 
 	uint32_t pollRateHz = Storage::getInstance().getGamepadOptions().usbPollRate;
@@ -152,15 +158,15 @@ static uint8_t const *applyUsbPollRate(uint8_t const *desc) {
 }
 
 // The dedicated HML config interface rides along in every mode except the
-// ones below: web-config has its own channel, P5General must present the
-// exact GNS dongle descriptor to the PS5 (it carries the config channel
-// inside its main interface instead), and the Xbox drivers negotiate MS OS
-// 2.0 descriptors the console checks strictly.
+// ones below: web-config has its own channel, PS5 mode must present its
+// DualSense-compatible descriptor unmodified to the console (no config
+// channel there; tune in another mode - settings storage is shared), and the
+// Xbox drivers negotiate MS OS 2.0 descriptors the console checks strictly.
 static bool hmlConfigItfAllowed() {
 	if (DriverManager::getInstance().isConfigMode())
 		return false;
 	InputMode mode = DriverManager::getInstance().getInputMode();
-	return mode != INPUT_MODE_P5GENERAL &&
+	return !isPS5Mode(mode) &&
 	       mode != INPUT_MODE_XBONE &&
 	       mode != INPUT_MODE_XBOXORIGINAL;
 }
@@ -178,6 +184,11 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 
 uint8_t const* tud_descriptor_device_qualifier_cb() {
 	return DriverManager::getInstance().getDriver()->get_descriptor_device_qualifier_cb();
+}
+
+// Invoked when received GET OTHER SPEED CONFIGURATION DESCRIPTOR request
+uint8_t const* tud_descriptor_other_speed_configuration_cb(uint8_t index) {
+	return DriverManager::getInstance().getDriver()->get_descriptor_other_speed_configuration_cb(index);
 }
 
 #endif

@@ -299,7 +299,7 @@ void handleSet(const uint8_t *buffer, uint16_t bufsize) {
     }
     case 0x05: { // SET_INPUT_MODE: persist and reboot into the new driver
         if (bufsize < 2) return;
-        if (buffer[1] > INPUT_MODE_P5GENERAL) return;
+        if (!isSelectableInputMode(buffer[1])) return;
         GamepadOptions &gamepadOptions = Storage::getInstance().getGamepadOptions();
         gamepadOptions.inputMode = (InputMode)buffer[1];
         EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true, true));

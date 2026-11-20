@@ -28,8 +28,16 @@
 #define _HMLConfigChannel_H_
 
 #include <stdint.h>
+#include "enums.pb.h"
 
 namespace HMLConfigChannel {
+
+// InputMode values that can be selected from the config tool / mode combos
+// (gaps in the enum and INPUT_MODE_CONFIG are rejected)
+inline bool isSelectableInputMode(int32_t mode) {
+    return (mode >= INPUT_MODE_XINPUT && mode <= INPUT_MODE_SINPUT) ||
+           mode == INPUT_MODE_SWITCH2_PRO;
+}
 
 constexpr uint8_t REPORT_SET = 0x60;
 constexpr uint8_t REPORT_GET = 0x61;
@@ -58,7 +66,7 @@ extern const uint16_t hml_config_report_descriptor_len;
 const uint8_t *patchConfigDescriptor(const uint8_t *desc);
 
 // Mark the dedicated interface as absent (modes that must not grow extra
-// interfaces, e.g. P5General, keep their descriptor untouched)
+// interfaces, e.g. PS5, keep their descriptor untouched)
 void disableInterface();
 
 // True if the last enumerated configuration includes the dedicated interface

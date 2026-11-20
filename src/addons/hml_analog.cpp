@@ -64,16 +64,17 @@ void HMLAnalogAddon::setup() {
 // One WS2812 lightbar showing a fixed user-configured color. This avoids the
 // generic NeoPico/player-LED path, whose animation-brightness and per-player
 // level gates zero the pixel.
-// PIO placement: Pico-PIO-USB (PS5 dongle host) uses pio0/sm0 for TX and
-// pio1/sm0 (RX) + pio1/sm1 (EOP detect). Claiming pio1/sm1 kills the host's
-// EOP state machine - the dongle then never authenticates and the PS5 drops
-// the controller - so the lightbar lives on pio0/sm1 instead.
+// PIO placement: Pico-PIO-USB (PS5 dongle host) runs single-PIO on pio0
+// (sm0 TX, sm1 RX, sm2 EOP; see peripheral_usb.cpp). Claiming any of those
+// kills the host - the dongle then never authenticates and the PS5 drops the
+// controller. The generic NeoPico addon uses pio1/sm0, so the lightbar takes
+// pio1/sm1.
 void HMLAnalogAddon::lightbarSetup() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     if (!opts.lightbarEnabled || opts.lightbarPin < 0 || opts.lightbarPin >= 30)
         return;
     lightbar = new NeoPico();
-    lightbar->Setup(opts.lightbarPin, 1, LED_FORMAT_GRB, pio0, 1);
+    lightbar->Setup(opts.lightbarPin, 1, LED_FORMAT_GRB, pio1, 1);
     lightbar->Off(); // start dark
 }
 
