@@ -353,6 +353,11 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
             buffer[37] = ads->hwCs ? 1 : 0;
             buffer[38] = ads->stitch ? 1 : 0;
         }
+        // v4: pipeline timing (us, little-endian u16)
+        put16(buffer + 40, HMLAnalogAddon::timing.loopAvgUs);
+        put16(buffer + 42, HMLAnalogAddon::timing.loopMaxUs);
+        put16(buffer + 44, HMLAnalogAddon::timing.acquireUs);
+        put16(buffer + 46, HMLAnalogAddon::timing.ageUs);
         break;
     }
     case 0x02: { // PARAM: single value

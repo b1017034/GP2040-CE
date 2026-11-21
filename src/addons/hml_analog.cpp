@@ -11,14 +11,15 @@ uint16_t HMLAnalogAddon::rawChannels[ADS8332_CHANNEL_COUNT] = {0};
 uint16_t HMLAnalogAddon::rawAdc[2] = {0};
 bool HMLAnalogAddon::rawValid = false;
 HMLAnalogAddon* HMLAnalogAddon::instance = nullptr;
+HMLTimingStats HMLAnalogAddon::timing;
 
-// Sensitivity curve presets (percent in/out), Firebird-compatible
-static const uint8_t CURVE_PRESETS[5][3][2] = {
-    {{30,30},{70,70},{100,100}},   // 0 linear
-    {{60,30},{90,80},{100,100}},   // 1 slow start
-    {{30,60},{70,90},{100,100}},   // 2 quick start
-    {{20,80},{60,95},{100,100}},   // 3 instant
-    {{30,25},{70,75},{100,100}},   // 4 smooth start
+// Sensitivity curve presets (fraction in/out), Firebird-compatible
+static const float CURVE_PRESETS[5][3][2] = {
+    {{0.30f,0.30f},{0.70f,0.70f},{1.0f,1.0f}},   // 0 linear
+    {{0.60f,0.30f},{0.90f,0.80f},{1.0f,1.0f}},   // 1 slow start
+    {{0.30f,0.60f},{0.70f,0.90f},{1.0f,1.0f}},   // 2 quick start
+    {{0.20f,0.80f},{0.60f,0.95f},{1.0f,1.0f}},   // 3 instant
+    {{0.30f,0.25f},{0.70f,0.75f},{1.0f,1.0f}},   // 4 smooth start
 };
 
 bool HMLAnalogAddon::available() {
@@ -58,7 +59,9 @@ void HMLAnalogAddon::setup() {
 
     lightbarSetup();
 
-    lastMicros = to_us_since_boot(get_absolute_time());
+    lastProcessUs = time_us_32();
+    acquireEndUs = lastProcessUs;
+    timingWindowUs = lastProcessUs;
 }
 
 // One WS2812 lightbar showing a fixed user-configured color. This avoids the
@@ -116,11 +119,17 @@ void HMLAnalogAddon::lightbarUpdate() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Stick pipeline. Everything below runs every loop, so it lives in RAM
+// (__not_in_flash_func): with the firmware far larger than the 16KB XIP
+// cache, flash-resident hot code takes cache-miss stalls of several us.
+// ---------------------------------------------------------------------------
+
 // Map raw ADC to normalized -1..1 using min/center/max calibration
-float HMLAnalogAddon::calibrate(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_t mx) {
+static float __not_in_flash_func(calibrate)(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_t mx) {
     if (mx <= mn || ctr <= mn || mx <= ctr) {
         // Uncalibrated: assume full range, center at midpoint
-        return ((float)raw - 32768.0f) / 32768.0f;
+        return ((float)raw - 32768.0f) * (1.0f / 32768.0f);
     }
     float v;
     if (raw >= ctr) {
@@ -132,31 +141,23 @@ float HMLAnalogAddon::calibrate(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_
 }
 
 // Piecewise-linear sensitivity curve on stick magnitude (0..1 in, 0..1 out)
-float HMLAnalogAddon::applyCurve(float mag, const void* stickOptsV) {
-    const HMLStickOptions& s = *(const HMLStickOptions*)stickOptsV;
-    float px = 0.0f, py = 0.0f;
-    uint32_t preset = s.curvePreset;
+static float __not_in_flash_func(applyCurve)(float mag, const HMLStickOptions& s) {
+    const bool custom = s.curvePreset >= 5;
     uint32_t count;
-    float xs[HML_CURVE_MAX_POINTS + 1], ys[HML_CURVE_MAX_POINTS + 1];
-
-    if (preset >= 5) { // custom
+    if (custom) {
         count = std::min<uint32_t>(s.curveX_count, (uint32_t)HML_CURVE_MAX_POINTS);
+        if (s.curveY_count < count) count = s.curveY_count;
         if (s.curvePointCount > 0 && s.curvePointCount < count) count = s.curvePointCount;
         if (count == 0) return mag; // no custom points -> linear
-        for (uint32_t i = 0; i < count; i++) {
-            xs[i] = s.curveX[i] / 100.0f;
-            ys[i] = s.curveY[i] / 100.0f;
-        }
     } else {
         count = 3;
-        for (uint32_t i = 0; i < 3; i++) {
-            xs[i] = CURVE_PRESETS[preset][i][0] / 100.0f;
-            ys[i] = CURVE_PRESETS[preset][i][1] / 100.0f;
-        }
     }
+    const float (*preset)[2] = custom ? nullptr : CURVE_PRESETS[s.curvePreset];
 
+    float px = 0.0f, py = 0.0f;
     for (uint32_t i = 0; i < count; i++) {
-        float nx = xs[i], ny = ys[i];
+        float nx = custom ? (float)s.curveX[i] * 0.01f : preset[i][0];
+        float ny = custom ? (float)s.curveY[i] * 0.01f : preset[i][1];
         if (mag <= nx) {
             float denom = nx - px;
             if (denom <= 0.0001f) return ny;
@@ -170,8 +171,9 @@ float HMLAnalogAddon::applyCurve(float mag, const void* stickOptsV) {
 // RC filter strength lookup for advanced (velocity curve) mode.
 // FireBird convention: point 0 is 静止 (velocity 0), last point is 最大速度
 // (velocity 128); the UI keeps the X values consistent with that.
-static float rcStrengthForVelocity(const HMLStickOptions& s, float vel128) {
+static float __not_in_flash_func(rcStrengthForVelocity)(const HMLStickOptions& s, float vel128) {
     uint32_t count = (s.rcCurveX_count < HML_RC_CURVE_MAX_POINTS) ? s.rcCurveX_count : HML_RC_CURVE_MAX_POINTS;
+    if (s.rcCurveY_count < count) count = s.rcCurveY_count;
     if (s.rcCurvePointCount > 0 && s.rcCurvePointCount < count) count = s.rcCurvePointCount;
     if (count == 0) return (float)s.rcFilterStrength;
     float px = 0.0f, py = (float)s.rcCurveY[0];
@@ -189,13 +191,15 @@ static float rcStrengthForVelocity(const HMLStickOptions& s, float vel128) {
 }
 
 static inline float scalePct(uint32_t v) {
-    return (v == 0 ? 100.0f : (float)v) / 100.0f;
+    return v == 0 ? 1.0f : (float)v * 0.01f;
 }
 
 // FireBird per-axis deadzone: inner% .. outer% of travel maps to 0..1
-static float axisDeadzone(float v, uint32_t innerPct, uint32_t outerPct) {
-    float inner = (float)innerPct / 100.0f;
-    float outer = (outerPct == 0 ? 100.0f : (float)outerPct) / 100.0f;
+static float __not_in_flash_func(axisDeadzone)(float v, uint32_t innerPct, uint32_t outerPct) {
+    // Default settings (no inner, full outer) reduce to a clamp
+    if (innerPct == 0 && (outerPct == 0 || outerPct == 100)) return std::clamp(v, -1.0f, 1.0f);
+    float inner = (float)innerPct * 0.01f;
+    float outer = (outerPct == 0 ? 1.0f : (float)outerPct * 0.01f);
     if (outer <= inner + 0.001f) outer = inner + 0.001f;
     float av = fabsf(v);
     if (av <= inner) return 0.0f;
@@ -205,33 +209,44 @@ static float axisDeadzone(float v, uint32_t innerPct, uint32_t outerPct) {
 }
 
 // FireBird アンチデッドゾーン: minimum output once outside the inner deadzone
-static float antiDeadzone(float v, uint32_t antiPct) {
+static float __not_in_flash_func(antiDeadzone)(float v, uint32_t antiPct) {
     if (antiPct == 0 || fabsf(v) < 0.0001f) return v;
-    float anti = (float)antiPct / 100.0f;
+    float anti = (float)antiPct * 0.01f;
     float av = anti + fabsf(v) * (1.0f - anti);
     if (av > 1.0f) av = 1.0f;
     return v >= 0 ? av : -av;
 }
 
+// Rate-independent RC low-pass coefficient.
+// The FireBird filters are defined per 1kHz sample: alpha1 = k / (k + R).
+// For a loop running at any other rate, the per-sample coefficient that gives
+// the same continuous-time response is alpha = 1 - (1 - alpha1)^(dt/1ms).
+// (The old q = k/dt form only matched at exactly 1kHz; at the real ~2-4kHz
+// loop rate it made every filter several times weaker than intended, and the
+// feel changed whenever the loop got faster or slower.)
+static float __not_in_flash_func(rcAlpha)(HMLRcCache& c, float k, float strength, float dtMs) {
+    if (!c.valid || c.strength != strength) {
+        float alpha1 = k / (k + strength);
+        c.logKeep = logf(1.0f - alpha1);
+        c.strength = strength;
+        c.valid = true;
+    }
+    return 1.0f - expf(c.logKeep * dtMs);
+}
+
 // Snapback filter approximation: RC low-pass (same formula as the positive RC
 // filter, R = strength*5) applied only while the axis is returning toward /
 // crossing center, so press response is untouched
-static float snapbackAxis(float v, float& filt, float strength, float dtMs) {
-    if (strength < 0.5f) { filt = v; return v; }
-    bool returning = (v * filt < 0.0f) || (fabsf(v) < fabsf(filt));
-    if (returning) {
-        float q = 100.0f / dtMs;
-        float r = strength * 5.0f;
-        filt += (v - filt) * q / (q + r);
-    } else {
-        filt = v;
-    }
+static float __not_in_flash_func(snapbackAxis)(float v, float& filt, bool returningGate, float alpha) {
+    bool returning = returningGate && ((v * filt < 0.0f) || (fabsf(v) < fabsf(filt)));
+    if (returning) filt += (v - filt) * alpha;
+    else filt = v;
     return filt;
 }
 
 // FireBird 角度補正 map: enabled entries (in -> out, snap deadzone) remap the
 // angle piecewise-linearly around the circle. Angles in degrees, 0=up, cw.
-static float applyAngleMap(const HMLStickOptions& s, float ang) {
+static float __not_in_flash_func(applyAngleMap)(const HMLStickOptions& s, float ang) {
     uint32_t total = s.angleMapCount;
     if (total > s.angleMapIn100_count) total = s.angleMapIn100_count;
     if (total > s.angleMapOut100_count) total = s.angleMapOut100_count;
@@ -241,9 +256,9 @@ static float applyAngleMap(const HMLStickOptions& s, float ang) {
     uint32_t n = 0;
     for (uint32_t i = 0; i < total; i++) {
         if (!(s.angleMapEnable & (1u << i))) continue;
-        in[n] = (float)s.angleMapIn100[i] / 100.0f;
-        out[n] = (float)s.angleMapOut100[i] / 100.0f;
-        dz[n] = (i < s.angleMapDz100_count) ? (float)s.angleMapDz100[i] / 100.0f : 0.0f;
+        in[n] = (float)s.angleMapIn100[i] * 0.01f;
+        out[n] = (float)s.angleMapOut100[i] * 0.01f;
+        dz[n] = (i < s.angleMapDz100_count) ? (float)s.angleMapDz100[i] * 0.01f : 0.0f;
         n++;
     }
     if (n == 0) return ang;
@@ -275,21 +290,20 @@ static float applyAngleMap(const HMLStickOptions& s, float ang) {
     return res;
 }
 
-// Firebird RC filter, bit-faithful to stock FireBird v3.08 (disassembled):
-// R > 0:  filt += (raw - filt) * q / (q + R)   with q = 100 at a 1kHz loop
-//         (alpha = 100/(100+R); R=+500 is only ~5ms of lag -- jitter dies in
-//         the console's 8-bit output quantization, response stays crisp)
-// R < 0:  B = -R; base low-pass with w = 200 at 1kHz, then a velocity lead
-//         term (B+25)/25 per sample fed back into the state
-static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength, float dtMs) {
+// Firebird RC filter (formulas from stock FireBird v3.08, defined per 1kHz
+// sample; see rcAlpha() for the rate conversion):
+// R > 0:  filt += (raw - filt) * alpha,  alpha@1kHz = 100/(100+R)
+//         (R=+500 is only ~5ms of lag -- jitter dies in the console's 8-bit
+//         output quantization, response stays crisp)
+// R < 0:  B = -R; base low-pass with alpha@1kHz = 200/(200+B), then a
+//         velocity lead term (B+25)/25 per sample fed back into the state
+static float __not_in_flash_func(rcFilterAxis)(float raw, float prevRaw, float& filt, float strength, float alpha) {
     if (strength > 0.5f) {
-        float q = 100.0f / dtMs;
-        filt += (raw - filt) * q / (q + strength);
+        filt += (raw - filt) * alpha;
     } else if (strength < -0.5f) {
         float b = -strength;
-        float w = 200.0f / dtMs;
-        float smoothed = (raw * w + filt * b) / (w + b);
-        filt = smoothed + (raw - prevRaw) * (b + 25.0f) / 25.0f;
+        float smoothed = filt + (raw - filt) * alpha;
+        filt = smoothed + (raw - prevRaw) * (b + 25.0f) * (1.0f / 25.0f);
         if (filt > 1.25f) filt = 1.25f;
         if (filt < -1.25f) filt = -1.25f;
     } else {
@@ -298,21 +312,17 @@ static float rcFilterAxis(float raw, float prevRaw, float& filt, float strength,
     return filt;
 }
 
-void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, float rawX, float rawY, float& outX, float& outY) {
+void __not_in_flash_func(HMLAnalogAddon::processStick)(const void* stickOptsV, HMLStickState& st, float rawX, float rawY, float& outX, float& outY) {
     const HMLStickOptions& s = *(const HMLStickOptions*)stickOptsV;
+    const float dtMs = frameDtMs;
 
     if (s.invertX) rawX = -rawX;
     if (s.invertY) rawY = -rawY;
 
-    uint32_t nowUs = to_us_since_boot(get_absolute_time());
-    float dtMs = (nowUs - lastMicros) / 1000.0f;
-    if (dtMs < 0.1f) dtMs = 0.1f;
-    if (dtMs > 10.0f) dtMs = 10.0f;
-
     // RC filter parameters
     float strength = (float)s.rcFilterStrength;
     if (s.rcAdvanced) {
-        float velMult = (s.rcVelocityMult100 > 0 ? s.rcVelocityMult100 : 100) / 100.0f;
+        float velMult = (s.rcVelocityMult100 > 0 ? (float)s.rcVelocityMult100 : 100.0f) * 0.01f;
         float dx = rawX - st.prevRawX;
         float dy = rawY - st.prevRawY;
         float vel = sqrtf(dx*dx + dy*dy) / dtMs;   // normalized units per ms
@@ -321,15 +331,32 @@ void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, flo
         strength = rcStrengthForVelocity(s, vel128);
     }
 
-    float fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, dtMs);
-    float fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, dtMs);
+    float fx, fy;
+    if (strength > 0.5f) {
+        float a = rcAlpha(st.rcCache, 100.0f, strength, dtMs);
+        fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, a);
+        fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, a);
+    } else if (strength < -0.5f) {
+        float a = rcAlpha(st.rcCache, 200.0f, -strength, dtMs);
+        fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, a);
+        fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, a);
+    } else {
+        fx = st.filtX = rawX;
+        fy = st.filtY = rawY;
+    }
     st.prevRawX = rawX;
     st.prevRawY = rawY;
 
     // Snapback filter: damp only the return-to-center phase (approximation of
     // FireBird's snapback filter; strength 0 = off)
-    fx = snapbackAxis(fx, st.snapX, (float)s.rcSnapback, dtMs);
-    fy = snapbackAxis(fy, st.snapY, (float)s.rcSnapback, dtMs);
+    if (s.rcSnapback > 0) {
+        float a = rcAlpha(st.snapCache, 100.0f, (float)s.rcSnapback * 5.0f, dtMs);
+        fx = snapbackAxis(fx, st.snapX, true, a);
+        fy = snapbackAxis(fy, st.snapY, true, a);
+    } else {
+        st.snapX = fx;
+        st.snapY = fy;
+    }
 
     // FireBird 入力スケール: per-direction gain (100 = calibrated range)
     fx *= (fx >= 0 ? scalePct(s.scaleRight) : scalePct(s.scaleLeft));
@@ -340,24 +367,26 @@ void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, flo
     fx = axisDeadzone(fx, s.innerX, s.outerX);
     fy = axisDeadzone(fy, s.innerY, s.outerY);
 
-    float mag = sqrtf(fx*fx + fy*fy);
-    if (mag < 0.0001f) {
+    float mag2 = fx*fx + fy*fy;
+    if (mag2 < 1e-8f) {
         emitStick(stickOptsV, st, 0.0f, 0.0f, outX, outY);
         return;
     }
-    float outMag = applyCurve(std::min(mag, 1.0f), stickOptsV);
+    float mag = sqrtf(mag2);
+    float outMag = applyCurve(std::min(mag, 1.0f), s);
 
     // FireBird 角度補正: angle map -> global offset -> angle snap.
     // Angle convention matches the FireBird UI: 0=up, clockwise, degrees.
-    float ca = fx / mag, sa = fy / mag;
+    float invMag = 1.0f / mag;
+    float ca = fx * invMag, sa = fy * invMag;
     if (s.angleOffset100 != 0 || s.angleSnap != 0 ||
         (s.angleMapCount > 0 && s.angleMapEnable != 0)) {
         float ang = atan2f(ca, sa) * 57.29578f; // 0=up, cw
         if (ang < 0) ang += 360.0f;
         ang = applyAngleMap(s, ang);
-        ang += (float)s.angleOffset100 / 100.0f;
-        if (s.angleSnap == 1) ang = roundf(ang / 45.0f) * 45.0f;
-        else if (s.angleSnap == 2) ang = roundf(ang / 90.0f) * 90.0f;
+        ang += (float)s.angleOffset100 * 0.01f;
+        if (s.angleSnap == 1) ang = roundf(ang * (1.0f / 45.0f)) * 45.0f;
+        else if (s.angleSnap == 2) ang = roundf(ang * (1.0f / 90.0f)) * 90.0f;
         float rad = ang * 0.0174533f;
         ca = sinf(rad);
         sa = cosf(rad);
@@ -370,9 +399,9 @@ void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, flo
     if (s.diagScaleX > 0 || s.diagScaleY > 0) {
         float absCa = std::max(fabsf(ca), 1e-6f);
         float absSa = std::max(fabsf(sa), 1e-6f);
-        float maxSquare = std::min(1.0f / absCa, 1.0f / absSa);
-        float ex = 1.0f + 0.4142f * (float)s.diagScaleX / 100.0f;
-        float ey = 1.0f + 0.4142f * (float)s.diagScaleY / 100.0f;
+        float maxSquare = 1.0f / std::max(absCa, absSa);
+        float ex = 1.0f + 0.004142f * (float)s.diagScaleX;
+        float ey = 1.0f + 0.004142f * (float)s.diagScaleY;
         float denom2 = (ca * ca) / (ex * ex) + (sa * sa) / (ey * ey);
         float maxEllipse = 1.0f / sqrtf(std::max(denom2, 1e-9f));
         outMag *= std::min(maxSquare, maxEllipse);
@@ -389,35 +418,47 @@ void HMLAnalogAddon::processStick(const void* stickOptsV, HMLStickState& st, flo
 }
 
 // FireBird 出力補正 (resolution quantize + extra delay) and final output
-void HMLAnalogAddon::emitStick(const void* stickOptsV, HMLStickState& st, float x, float y, float& outX, float& outY) {
+void __not_in_flash_func(HMLAnalogAddon::emitStick)(const void* stickOptsV, HMLStickState& st, float x, float y, float& outX, float& outY) {
     const HMLStickOptions& s = *(const HMLStickOptions*)stickOptsV;
     // スティック分解能: quantize to N steps across the full -1..1 range
     if (s.resolution >= 2) {
         float steps = (float)(s.resolution - 1);
-        x = roundf((x + 1.0f) * 0.5f * steps) / steps * 2.0f - 1.0f;
-        y = roundf((y + 1.0f) * 0.5f * steps) / steps * 2.0f - 1.0f;
+        float invSteps = 1.0f / steps;
+        x = roundf((x + 1.0f) * 0.5f * steps) * invSteps * 2.0f - 1.0f;
+        y = roundf((y + 1.0f) * 0.5f * steps) * invSteps * 2.0f - 1.0f;
     }
-    // 追加入力遅延: ring buffer, replay the sample from delayMs ago
+    // 追加入力遅延: time-decimated ring, replay the sample from delayMs ago
     if (s.delayMs > 0) {
-        uint32_t now = to_us_since_boot(get_absolute_time());
-        st.dlyX[st.dlyHead] = x;
-        st.dlyY[st.dlyHead] = y;
-        st.dlyT[st.dlyHead] = now;
-        st.dlyHead = (st.dlyHead + 1) % HML_DELAY_SLOTS;
-        if (st.dlyCount < HML_DELAY_SLOTS) st.dlyCount++;
+        const uint32_t now = frameNowUs;
+        if (st.dlyCount == 0 || (uint32_t)(now - st.dlyLastStoreUs) >= HML_DELAY_STORE_US) {
+            st.dlyX[st.dlyHead] = x;
+            st.dlyY[st.dlyHead] = y;
+            st.dlyT[st.dlyHead] = now;
+            st.dlyHead = (uint8_t)((st.dlyHead + 1) % HML_DELAY_SLOTS);
+            if (st.dlyCount < HML_DELAY_SLOTS) st.dlyCount++;
+            st.dlyLastStoreUs = now;
+        }
         uint32_t target = now - s.delayMs * 1000;
         // oldest -> newest, keep the newest sample that is old enough
         float dx = x, dy = y;
         bool found = false;
         for (uint8_t i = 0; i < st.dlyCount; i++) {
-            uint8_t idx = (st.dlyHead + HML_DELAY_SLOTS - st.dlyCount + i) % HML_DELAY_SLOTS;
+            uint8_t idx = (uint8_t)((st.dlyHead + HML_DELAY_SLOTS - st.dlyCount + i) % HML_DELAY_SLOTS);
             if ((int32_t)(st.dlyT[idx] - target) > 0) break;
             dx = st.dlyX[idx];
             dy = st.dlyY[idx];
             found = true;
         }
         if (found) { x = dx; y = dy; }
-        else { x = 0.0f; y = 0.0f; } // buffer not old enough yet
+        else if (st.dlyCount > 0) {
+            // Not old enough yet (just enabled / just booted): hold the oldest
+            // sample instead of snapping the stick to center
+            uint8_t oldest = (uint8_t)((st.dlyHead + HML_DELAY_SLOTS - st.dlyCount) % HML_DELAY_SLOTS);
+            x = st.dlyX[oldest];
+            y = st.dlyY[oldest];
+        }
+    } else {
+        st.dlyCount = 0;
     }
     outX = x;
     outY = y;
@@ -454,6 +495,7 @@ bool HMLAnalogAddon::noiseSample(uint16_t* mn, uint16_t* mx, int iterations) {
     for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) { mn[i] = 0xFFFF; mx[i] = 0; }
     for (int it = 0; it < iterations; it++) {
         instance->ads->readAll(ch);
+        if (!instance->ads->scanCompleted) continue; // window not filled yet
         for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) {
             if (ch[i] < mn[i]) mn[i] = ch[i];
             if (ch[i] > mx[i]) mx[i] = ch[i];
@@ -462,21 +504,19 @@ bool HMLAnalogAddon::noiseSample(uint16_t* mn, uint16_t* mx, int iterations) {
     return true;
 }
 
-void HMLAnalogAddon::preprocess() {
+// Runs right after the USB report was queued (see header): fetch the next
+// frame's samples.
+void __not_in_flash_func(HMLAnalogAddon::postprocess)(bool sent) {
+    (void)sent;
+    acquire();
+    lightbarUpdate();
+}
+
+void __not_in_flash_func(HMLAnalogAddon::acquire)() {
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
-    if (ads == nullptr) return;
+    if (ads == nullptr || !ads->linkOk) return;
 
-    // Self-heal: after a warm reboot the ADC may still be desynced when the
-    // first probe runs; keep retrying the link until it comes up.
-    if (!ads->linkOk) {
-        uint32_t now = to_ms_since_boot(get_absolute_time());
-        if ((int32_t)(now - adsRetryMs) >= 0) {
-            adsRetryMs = now + 500;
-            ads->init();
-        }
-        if (!ads->linkOk) return; // sticks stay centered until the link is up
-    }
-
+    uint32_t t0 = time_us_32();
     ads->readAll(rawChannels);
     if (adcInitialized) {
         if (opts.ltAdcPin >= 26 && opts.ltAdcPin <= 29) {
@@ -488,9 +528,31 @@ void HMLAnalogAddon::preprocess() {
             rawAdc[1] = adc_read();
         }
     }
-    // Only report valid once a complete scan has run: otherwise the zeroed
-    // buffer reads as full deflection (stick pinned to a corner) after boot
+    // Only report valid once every channel has a full median window:
+    // otherwise the zeroed buffer reads as full deflection after boot
     rawValid = ads->scanCompleted;
+    acquireEndUs = time_us_32();
+    uint32_t took = acquireEndUs - t0;
+    timing.acquireUs = (uint16_t)(took > 0xFFFF ? 0xFFFF : took);
+}
+
+void __not_in_flash_func(HMLAnalogAddon::preprocess)() {
+    const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
+    if (ads == nullptr) return;
+
+    // Self-heal: after a warm reboot the ADC may still be desynced when the
+    // first probe runs; keep retrying the link until it comes up.
+    if (!ads->linkOk) {
+        rawValid = false;
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if ((int32_t)(now - adsRetryMs) >= 0) {
+            adsRetryMs = now + 500;
+            ads->init();
+        }
+        if (!ads->linkOk) return; // sticks stay centered until the link is up
+        acquire(); // first samples right away instead of a loop later
+    }
+    if (!rawValid) return;
 
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
 
@@ -531,7 +593,7 @@ void HMLAnalogAddon::preprocess() {
 // FireBird 動作の安定化: 静止中 (ノイズ幅以内の変動) は直前の値をホールドし、
 // ノイズ幅を超えて動いたら生値へ完全追従する。追従型 (raw±band を返す) にする
 // と中央・最大値が常に band ぶんズレるので不可。
-static uint16_t gateAxis(uint16_t raw, uint16_t& held, uint32_t band) {
+static uint16_t __not_in_flash_func(gateAxis)(uint16_t raw, uint16_t& held, uint32_t band) {
     if (band == 0) { held = raw; return raw; }
     // 静止時ジッターの抑制が目的なのでバンドはフルスケール5%まで: 計測異常で
     // 巨大な値が保存されても軸が凍らないようにする
@@ -541,7 +603,37 @@ static uint16_t gateAxis(uint16_t raw, uint16_t& held, uint32_t band) {
     return held;
 }
 
-void HMLAnalogAddon::process() {
+void __not_in_flash_func(HMLAnalogAddon::updateTiming)(uint32_t nowUs) {
+    uint32_t loop = nowUs - lastProcessUs;
+    if (loop > 0xFFFF) loop = 0xFFFF;
+    // EMA with 1/16 weight, kept in 1/16 us
+    loopAvgQ4 = loopAvgQ4 - (loopAvgQ4 >> 4) + loop;
+    timing.loopAvgUs = (uint16_t)(loopAvgQ4 >> 4);
+    if (loop > loopMaxWindowUs) loopMaxWindowUs = (uint16_t)loop;
+    if ((uint32_t)(nowUs - timingWindowUs) >= 1000000u) {
+        timing.loopMaxUs = loopMaxWindowUs;
+        loopMaxWindowUs = 0;
+        timingWindowUs = nowUs;
+    }
+    uint32_t age = nowUs - acquireEndUs;
+    timing.ageUs = (uint16_t)(age > 0xFFFF ? 0xFFFF : age);
+}
+
+static inline uint16_t toAxis16(float v) {
+    return (uint16_t)std::clamp((v + 1.0f) * 32767.5f, 0.0f, 65535.0f);
+}
+
+void __not_in_flash_func(HMLAnalogAddon::process)() {
+    // One clock sample per frame: dt for every filter, delay timestamps
+    const uint32_t nowUs = time_us_32();
+    float dtMs = (float)(nowUs - lastProcessUs) * 0.001f;
+    if (dtMs < 0.1f) dtMs = 0.1f;
+    if (dtMs > 10.0f) dtMs = 10.0f;
+    frameDtMs = dtMs;
+    frameNowUs = nowUs;
+    updateTiming(nowUs);
+    lastProcessUs = nowUs;
+
     const HMLAnalogOptions& opts = Storage::getInstance().getAddonOptions().hmlAnalogOptions;
     if (!rawValid) return;
     Gamepad *gamepad = Storage::getInstance().GetGamepad();
@@ -561,8 +653,8 @@ void HMLAnalogAddon::process() {
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
         processStick(&s, leftState, rawX, rawY, lx, ly);
-        gamepad->state.lx = (uint16_t)std::clamp((lx + 1.0f) * 32767.5f, 0.0f, 65535.0f);
-        gamepad->state.ly = (uint16_t)std::clamp((ly + 1.0f) * 32767.5f, 0.0f, 65535.0f);
+        gamepad->state.lx = toAxis16(lx);
+        gamepad->state.ly = toAxis16(ly);
     }
     if (opts.chRX >= 0 && opts.chRY >= 0) {
         const HMLStickOptions& s = opts.rightStick;
@@ -575,8 +667,8 @@ void HMLAnalogAddon::process() {
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
         processStick(&s, rightState, rawX, rawY, rx, ry);
-        gamepad->state.rx = (uint16_t)std::clamp((rx + 1.0f) * 32767.5f, 0.0f, 65535.0f);
-        gamepad->state.ry = (uint16_t)std::clamp((ry + 1.0f) * 32767.5f, 0.0f, 65535.0f);
+        gamepad->state.rx = toAxis16(rx);
+        gamepad->state.ry = toAxis16(ry);
     }
 
     // Analog triggers: hall outputs idle high and pull toward 0 when pressed.
@@ -601,8 +693,4 @@ void HMLAnalogAddon::process() {
         if (rt >= (255 * HML_TRIGGER_DIGITAL_PERCENT / 100))
             gamepad->state.buttons |= GAMEPAD_MASK_R2;
     }
-
-    lightbarUpdate();
-
-    lastMicros = to_us_since_boot(get_absolute_time());
 }

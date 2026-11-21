@@ -18,7 +18,19 @@
 
 #define HML_CURVE_MAX_POINTS 10
 #define HML_RC_CURVE_MAX_POINTS 7
-#define HML_DELAY_SLOTS 40
+// Input-delay ring: one sample stored every HML_DELAY_STORE_US, so the ring
+// spans HML_DELAY_SLOTS * HML_DELAY_STORE_US independent of the loop rate
+// (64 * 0.5ms = 32ms >= the 30ms UI maximum)
+#define HML_DELAY_SLOTS 64
+#define HML_DELAY_STORE_US 500
+
+// Cached ln(1 - alpha@1kHz) for one RC-style low-pass, keyed by its strength,
+// so the per-frame rate conversion is a single expf()
+struct HMLRcCache {
+    float strength = 0.0f;
+    float logKeep = 0.0f;
+    bool valid = false;
+};
 
 // Runtime state for one stick axis pair
 struct HMLStickState {
@@ -30,25 +42,43 @@ struct HMLStickState {
     // snapback filter state (return-phase low-pass)
     float snapX = 0.0f;
     float snapY = 0.0f;
+    HMLRcCache rcCache;
+    HMLRcCache snapCache;
     // noise gate: last held raw counts (Firebird-style stabilization)
     uint16_t heldX = 0;
     uint16_t heldY = 0;
     bool heldInit = false;
-    // FireBird 追加入力遅延: output ring buffer
+    // FireBird 追加入力遅延: output ring buffer (time-decimated)
     float dlyX[HML_DELAY_SLOTS] = {0};
     float dlyY[HML_DELAY_SLOTS] = {0};
     uint32_t dlyT[HML_DELAY_SLOTS] = {0};
     uint8_t dlyHead = 0;
     uint8_t dlyCount = 0;
+    uint32_t dlyLastStoreUs = 0;
+};
+
+// Pipeline timing (us), exposed over the config channel RAW page.
+// avg = exponential moving average, max = worst value of the last second.
+struct HMLTimingStats {
+    uint16_t loopAvgUs = 0;   // process() to process()
+    uint16_t loopMaxUs = 0;
+    uint16_t acquireUs = 0;   // ADC acquisition (SPI frames + RP2040 ADC)
+    uint16_t ageUs = 0;       // acquisition end -> stick processing
 };
 
 class HMLAnalogAddon : public GPAddon {
 public:
     virtual bool available();
     virtual void setup();
+    // Loop placement (latency): preprocess() maps the ADC-backed buttons from
+    // the latest samples, process() runs the stick pipeline, and the ADC
+    // acquisition itself runs in postprocess() - i.e. right after the USB
+    // report went out - so the ~200us of SPI frames never sit between the
+    // GPIO button read and the report, and the samples used next frame are
+    // only one loop-tail old.
     virtual void preprocess();
     virtual void process();
-    virtual void postprocess(bool sent) {}
+    virtual void postprocess(bool sent);
     virtual void reinit() {}
     virtual std::string name() { return HMLAnalogName; }
 
@@ -65,11 +95,12 @@ public:
     // Drive the lightbar from the webconfig loop (Core0 add-ons are skipped there)
     static void lightbarTick();
     static HMLAnalogAddon* instance;
+    static HMLTimingStats timing;
     ADS8332* getAds() { return ads; }
 
 private:
-    float calibrate(uint16_t raw, uint32_t mn, uint32_t ctr, uint32_t mx);
-    float applyCurve(float mag, const void* stickOpts);
+    void acquire();
+    void updateTiming(uint32_t nowUs);
     void processStick(const void* stickOpts, HMLStickState& st, float rawX, float rawY, float& outX, float& outY);
     void emitStick(const void* stickOpts, HMLStickState& st, float x, float y, float& outX, float& outY);
 
@@ -77,7 +108,14 @@ private:
     HMLStickState leftState;
     HMLStickState rightState;
     bool adcInitialized = false;
-    uint32_t lastMicros = 0;
+    // Per-frame clock: sampled once at the top of process()
+    uint32_t frameNowUs = 0;
+    float frameDtMs = 1.0f;
+    uint32_t lastProcessUs = 0;
+    uint32_t acquireEndUs = 0;
+    uint32_t timingWindowUs = 0;
+    uint16_t loopMaxWindowUs = 0;
+    uint32_t loopAvgQ4 = 0;   // EMA in 1/16 us
     // Self-heal: retry ADC link bring-up (a warm reboot can leave the chip
     // desynced and the first probe may fail)
     uint32_t adsRetryMs = 0;

@@ -21,6 +21,26 @@
 #define ADS8332_SPI_SPEED_HZ 2000000
 #endif
 
+// Software-CS auto-sequence read path:
+// Per-channel sliding median over the last N tagged samples. A single
+// mispaired frame (tag/data race) is an outlier the median drops, same as the
+// old block median, but every new sample updates the output immediately
+// instead of waiting for a whole multi-sweep block. 3 rejects one outlier, 5
+// rejects two (one sample more lag per step).
+#ifndef ADS8332_MEDIAN_WINDOW
+#define ADS8332_MEDIAN_WINDOW 3
+#endif
+// SPI frames per readAll() call. 8 = one sequencer sweep, so every channel
+// normally gets one fresh sample per call (~185us at 2MHz).
+#ifndef ADS8332_BURSTS_PER_CALL
+#define ADS8332_BURSTS_PER_CALL 8
+#endif
+// Link health window: within this many frames every channel must have been
+// seen at least ADS8332_HEALTH_MIN_SAMPLES times, else the window counts as
+// unhealthy; 3 unhealthy windows in a row drop the link for a re-probe.
+#define ADS8332_HEALTH_WINDOW 48
+#define ADS8332_HEALTH_MIN_SAMPLES 3
+
 // CMR commands (upper 4 bits of the 16-bit frame)
 #define ADS8332_CMD_SELECT_CH(ch) ((uint16_t)((ch) & 0x7) << 12)
 #define ADS8332_CMD_WAKEUP        0xB000
@@ -46,9 +66,9 @@ public:
 
     void init();
     // Read all 8 channels; channels not read keep their previous values.
-    // Software-CS mode does a bounded number of SPI bursts per call and
-    // accumulates across calls, so a single call stays well under the 1ms
-    // USB frame budget; values[] updates once a full scan completes.
+    // Software-CS mode does ADS8332_BURSTS_PER_CALL SPI frames per call and
+    // updates each channel's sliding median as its samples arrive; values[]
+    // is valid once scanCompleted is set (every channel has a full window).
     void readAll(uint16_t values[ADS8332_CHANNEL_COUNT]);
 
     // Diagnostics (exposed via webconfig)
@@ -79,12 +99,16 @@ private:
     int8_t csPin;
     int8_t rxPin;
 
-    // In-progress auto-sequence scan state (software CS mode)
-    uint16_t seqSamples[ADS8332_CHANNEL_COUNT][5];
-    uint8_t seqCounts[ADS8332_CHANNEL_COUNT] = {0};
-    uint8_t seqAttempts = 0;
-    // Runtime health: consecutive scans that hit the attempt cap without
-    // filling the bins (TAG stream broken) -> drop the link and re-probe
+    void resetScanState();
+
+    // Sliding-median state per channel (software CS mode)
+    uint16_t hist[ADS8332_CHANNEL_COUNT][ADS8332_MEDIAN_WINDOW];
+    uint8_t histCount[ADS8332_CHANNEL_COUNT] = {0}; // samples held (<= window)
+    uint8_t histPos[ADS8332_CHANNEL_COUNT] = {0};   // next write slot
+    // Link health (see ADS8332_HEALTH_WINDOW)
+    uint8_t healthSeen[ADS8332_CHANNEL_COUNT] = {0};
+    uint8_t healthFrames = 0;
+    // Consecutive unhealthy windows (TAG stream broken) -> drop the link
     uint8_t cappedScans = 0;
 };
 

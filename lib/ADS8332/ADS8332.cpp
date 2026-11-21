@@ -21,7 +21,9 @@ void ADS8332::setFormat(uint8_t mode) {
     spi->endTransaction();
 }
 
-uint8_t ADS8332::burst(const uint16_t *tx, uint16_t *rx, uint8_t count) {
+// Hot path (called every loop): keep it in RAM so XIP cache misses never
+// stall the SPI frame timing.
+uint8_t __not_in_flash_func(ADS8332::burst)(const uint16_t *tx, uint16_t *rx, uint8_t count) {
     if (!hwCs) {
         gpio_put(csPin, 0);
         busy_wait_us(1); // tD3: MSB valid 35ns after CS falling edge
@@ -38,7 +40,7 @@ uint8_t ADS8332::burst(const uint16_t *tx, uint16_t *rx, uint8_t count) {
     return msb;
 }
 
-void ADS8332::decode(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t &tag) const {
+void __not_in_flash_func(ADS8332::decode)(uint8_t msb, const uint16_t rx[2], uint16_t &value, uint8_t &tag) const {
     if (stitch) {
         // Sampled stream is one bit early: rx[0] = data<<1 | T2 (tag MSB), and
         // the true data MSB was captured from the pad at CS assertion. rx[1]
@@ -122,9 +124,7 @@ void ADS8332::init() {
     static const uint8_t order[4] = { 2, 3, 1, 0 };
     int8_t cfgCs = csPin;
     linkOk = false;
-    scanCompleted = false;
-    memset(seqCounts, 0, sizeof(seqCounts));
-    seqAttempts = 0;
+    resetScanState();
 
     // Abort any frame left over from before a warm reboot: park CS high well
     // past any conversion/frame timing before probing.
@@ -198,7 +198,36 @@ void ADS8332::init() {
     linkOk = false;
 }
 
-void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
+void ADS8332::resetScanState() {
+    scanCompleted = false;
+    memset(histCount, 0, sizeof(histCount));
+    memset(histPos, 0, sizeof(histPos));
+    memset(healthSeen, 0, sizeof(healthSeen));
+    healthFrames = 0;
+}
+
+// Median of a full window of samples for one channel (n == window size)
+static inline uint16_t __not_in_flash_func(windowMedian)(const uint16_t *h, uint8_t n) {
+#if ADS8332_MEDIAN_WINDOW == 3
+    (void)n;
+    uint16_t a = h[0], b = h[1], c = h[2];
+    // branchy median-of-3, no sort
+    if (a > b) { uint16_t t = a; a = b; b = t; }
+    if (b > c) { b = c; }
+    return (a > b) ? a : b;
+#else
+    uint16_t s[ADS8332_MEDIAN_WINDOW];
+    for (uint8_t i = 0; i < n; i++) {
+        uint16_t key = h[i];
+        int8_t j = (int8_t)i - 1;
+        while (j >= 0 && s[j] > key) { s[j + 1] = s[j]; j--; }
+        s[j + 1] = key;
+    }
+    return s[n / 2];
+#endif
+}
+
+void __not_in_flash_func(ADS8332::readAll)(uint16_t values[ADS8332_CHANNEL_COUNT]) {
     if (!linkOk) return;
 
     if (hwCs) {
@@ -221,63 +250,53 @@ void ADS8332::readAll(uint16_t values[ADS8332_CHANNEL_COUNT]) {
 
     // Software CS + auto-sequencing + TAG binning. Manual channel select is
     // silently ignored by this part, so auto mode is the only way to address
-    // all channels. Individual frames occasionally mispair tag and data
-    // (read races the sequencer), so gather many frames and take the median
-    // per bin - mispairs become outliers and drop out.
-    //
-    // Bounded per call: 16 bursts (~370us) instead of a full 24-48 burst scan,
-    // carrying the bins across calls, so the caller's loop can stay above
-    // 1kHz for the USB report pipeline. A full scan completes every 2-3 calls.
+    // all channels. Individual frames occasionally mispair tag and data, so
+    // each channel's output is the median of its last few samples: a mispair
+    // is an outlier and drops out, and every fresh sample updates the output
+    // right away (no waiting for a multi-sweep block to fill).
     uint16_t tx[2] = { ADS8332_CMD_READ_DATA, 0x0000 };
-    bool done = false;
-    for (uint8_t burstN = 0; burstN < 16 && !done; burstN++) {
+    for (uint8_t burstN = 0; burstN < ADS8332_BURSTS_PER_CALL; burstN++) {
         uint16_t rx[2];
         uint8_t msb = burst(tx, rx, 2);
         uint16_t value; uint8_t tag;
         decode(msb, rx, value, tag);
-        if (tag < ADS8332_CHANNEL_COUNT && seqCounts[tag] < 5) {
-            seqSamples[tag][seqCounts[tag]++] = value;
+        if (tag < ADS8332_CHANNEL_COUNT) {
+            uint8_t pos = histPos[tag];
+            hist[tag][pos] = value;
+            histPos[tag] = (uint8_t)((pos + 1) % ADS8332_MEDIAN_WINDOW);
+            if (histCount[tag] < ADS8332_MEDIAN_WINDOW) histCount[tag]++;
+            // Only publish once the window is full, so a single early
+            // mispair can never reach the output
+            if (histCount[tag] == ADS8332_MEDIAN_WINDOW)
+                values[tag] = windowMedian(hist[tag], ADS8332_MEDIAN_WINDOW);
+            if (healthSeen[tag] < 255) healthSeen[tag]++;
         }
-        seqAttempts++;
         busy_wait_us(4); // let the sequencer advance
-        // scan is complete once every bin has enough samples for a median
-        // (or we've burned the full attempt budget on mispairs)
-        done = true;
-        for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
-            if (seqCounts[i] < 3) { done = false; break; }
-        if (seqAttempts >= 48) {
-            // Bins never filled: the TAG stream is unhealthy. A few in a row
-            // means the data path is misaligned -> drop the link so the addon
-            // re-probes from scratch.
-            if (!done && ++cappedScans >= 3) {
-                linkOk = false;
-                scanCompleted = false;
+
+        // Link health: every channel must show up often enough per window.
+        // A misaligned data path yields garbage tags, so some bins starve.
+        if (++healthFrames >= ADS8332_HEALTH_WINDOW) {
+            bool healthy = true;
+            for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
+                if (healthSeen[i] < ADS8332_HEALTH_MIN_SAMPLES) { healthy = false; break; }
+            memset(healthSeen, 0, sizeof(healthSeen));
+            healthFrames = 0;
+            if (healthy) {
                 cappedScans = 0;
-                memset(seqCounts, 0, sizeof(seqCounts));
-                seqAttempts = 0;
+            } else if (++cappedScans >= 3) {
+                // TAG stream broken: drop the link so the addon re-probes
+                linkOk = false;
+                cappedScans = 0;
+                resetScanState();
                 return;
             }
-            done = true;
         }
     }
-    if (!done)
-        return; // scan continues next call; values[] keeps previous data
-    cappedScans = 0;
 
-    for (uint8_t ch = 0; ch < ADS8332_CHANNEL_COUNT; ch++) {
-        uint8_t n = seqCounts[ch];
-        if (n == 0) continue;              // keep previous value
-        // insertion-sort the few samples and take the middle one
-        uint16_t *s = seqSamples[ch];
-        for (uint8_t i = 1; i < n; i++) {
-            uint16_t key = s[i];
-            int8_t j = i - 1;
-            while (j >= 0 && s[j] > key) { s[j + 1] = s[j]; j--; }
-            s[j + 1] = key;
-        }
-        values[ch] = s[n / 2];
+    if (!scanCompleted) {
+        bool full = true;
+        for (uint8_t i = 0; i < ADS8332_CHANNEL_COUNT; i++)
+            if (histCount[i] < ADS8332_MEDIAN_WINDOW) { full = false; break; }
+        scanCompleted = full;
     }
-    memset(seqCounts, 0, sizeof(seqCounts));
-    seqAttempts = 0;
-    scanCompleted = true;
 }
