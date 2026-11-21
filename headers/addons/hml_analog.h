@@ -76,6 +76,18 @@ struct HMLTimingStats {
     uint16_t loopMaxUs = 0;
     uint16_t acquireUs = 0;   // ADC acquisition (SPI frames + RP2040 ADC)
     uint16_t ageUs = 0;       // acquisition end -> stick processing
+    // USB report scheduler, last 1s window (see USBReportSchedulerDiag)
+    uint16_t usbFrames = 0;       // SOFs per second
+    uint16_t usbReads = 0;        // reports read by the host per second
+    uint16_t usbPhaseAvgUs = 0;   // host read time within the frame
+    uint16_t usbPhaseMinUs = 0;
+    uint16_t usbPhaseMaxUs = 0;
+    uint16_t usbArmAgeAvgUs = 0;  // arm -> host read
+    uint16_t usbArmAgeMaxUs = 0;
+    uint16_t usbDataAgeAvgUs = 0; // stick ADC acquisition -> host read
+    uint16_t usbDataAgeMaxUs = 0;
+    uint16_t usbReplaced = 0;     // in-buffer replacements per second
+    uint16_t usbDeferred = 0;     // deferred analog-only reports per second
 };
 
 class HMLAnalogAddon : public GPAddon {

@@ -20,9 +20,35 @@ struct USBReportPriority {
     }
 };
 
+// Field diagnostics (BirdStrike). The host read of the armed report is
+// timestamped in the USB ISR (tud_event_hook_cb on XFER_COMPLETE), so these
+// are exact: where in the frame the host polls, and how old the input data
+// in the delivered report was at that moment.
+struct USBReportSchedulerDiag {
+    uint32_t frames = 0;            // SOFs seen
+    uint32_t reads = 0;             // armed reports read by the host
+    uint32_t phaseSumUs = 0;        // read time - frame SOF
+    uint32_t phaseMinUs = 0xFFFFFFFF;
+    uint32_t phaseMaxUs = 0;
+    uint32_t armAgeSumUs = 0;       // read time - arm (queue/replace) time
+    uint32_t armAgeMaxUs = 0;
+    uint32_t dataReads = 0;         // reads that carried a data timestamp
+    uint32_t dataAgeSumUs = 0;      // read time - input data timestamp
+    uint32_t dataAgeMaxUs = 0;
+    uint32_t replaced = 0;          // in-buffer replacements
+    uint32_t deferred = 0;          // analog-only reports held for later
+};
+
 class USBReportScheduler {
 public:
     static USBReportScheduler &getInstance();
+    // Snapshot and clear the diagnostics (safe against the USB ISR)
+    USBReportSchedulerDiag takeDiag();
+    // Acquisition time of the input data the next report will carry
+    // (optional; set by the input pipeline each frame)
+    void setDataTimestamp(uint32_t us) { dataUs = us; }
+    // USB ISR: a transfer completed (any endpoint)
+    void onXferCompleteIsr();
 
     // One active full-speed interrupt-IN endpoint, scheduled at USB frame boundaries.
     void configure(uint8_t endpoint, bool stageReports = false);
@@ -60,6 +86,29 @@ private:
                     USBReportPriority const &priority);
     void noteQueued(USBReportPriority const &priority, uint32_t sofEpoch,
                     bool replaceable);
+
+    USBReportSchedulerDiag diag;
+    volatile uint32_t lastArmUs = 0;
+    volatile uint32_t armedDataUs = 0;
+    volatile uint32_t dataUs = 0;
+    volatile bool armed = false;
+    void noteArmed();
+
+    // Host read-phase learning (BirdStrike). The deferral deadline upstream
+    // is the next SOF, but hosts poll the interrupt endpoint at a fixed
+    // offset inside the frame (Windows xHCI measured at ~647us). Once that
+    // offset is stable, defer analog-only reports until just before the
+    // predicted read instead of the frame boundary.
+    void noteReadPhase(uint32_t phaseUs);
+    volatile uint32_t lastReadSofEpoch = 0;
+    volatile bool lastReadValid = false;
+    volatile bool readPhaseReady = false;
+    volatile uint32_t readPhaseLoUs = 0;   // earliest recent read phase
+    uint32_t learnLoUs = 0;
+    uint32_t learnHiUs = 0;
+    uint32_t learnCount = 0;
+    uint32_t windowLoUs = 0xFFFFFFFF;
+    uint32_t windowCount = 0;
 
     uint8_t endpoint = 0;
     // Full-speed interrupt IN packets contain at most 64 bytes.

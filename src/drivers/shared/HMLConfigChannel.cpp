@@ -366,6 +366,15 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
         }
         break;
     }
+    case 0x04: { // USBSTATS: report scheduler timing, last 1s window (u16 us / counts)
+        buffer[0] = 0x04;
+        const HMLTimingStats &t = HMLAnalogAddon::timing;
+        const uint16_t v[] = { t.usbFrames, t.usbReads, t.usbPhaseAvgUs, t.usbPhaseMinUs, t.usbPhaseMaxUs,
+                               t.usbArmAgeAvgUs, t.usbArmAgeMaxUs, t.usbDataAgeAvgUs, t.usbDataAgeMaxUs,
+                               t.usbReplaced, t.usbDeferred, t.loopAvgUs, t.loopMaxUs, t.acquireUs };
+        for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); i++) put16(buffer + 1 + i * 2, v[i]);
+        break;
+    }
     case 0x02: { // PARAM: single value
         uint8_t *base; const ParamDef *table; size_t tableLen;
         if (!resolveTarget(selection.target, base, table, tableLen)) break;

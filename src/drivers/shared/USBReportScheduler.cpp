@@ -26,6 +26,16 @@ static constexpr uint32_t USB_FULL_SPEED_FRAME_US = 1000;
 // observed duration so truncation cannot turn it into an unsafe lower bound.
 static constexpr uint32_t TIME_US_32_RESOLUTION_US = 1;
 
+// Read-phase learning: consecutive reads within this spread make the phase
+// usable; an earlier read than learned by more than READ_PHASE_EARLY_US
+// forces re-learning. The deferral target sits READ_PHASE_GUARD_US before
+// the earliest recent read, and the floor follows the host slowly (window).
+static constexpr uint32_t READ_PHASE_LEARN_READS = 32;
+static constexpr uint32_t READ_PHASE_MAX_SPREAD_US = 60;
+static constexpr uint32_t READ_PHASE_EARLY_US = 15;
+static constexpr uint32_t READ_PHASE_GUARD_US = 40;
+static constexpr uint32_t READ_PHASE_WINDOW_READS = 1024;
+
 static inline uint32_t boundedElapsedUs(uint32_t elapsedUs) {
     return elapsedUs == UINT32_MAX ? elapsedUs : elapsedUs + TIME_US_32_RESOLUTION_US;
 }
@@ -33,6 +43,94 @@ static inline uint32_t boundedElapsedUs(uint32_t elapsedUs) {
 USBReportScheduler &__not_in_flash_func(USBReportScheduler::getInstance)() {
     static USBReportScheduler instance;
     return instance;
+}
+
+void __not_in_flash_func(USBReportScheduler::noteArmed)() {
+    uint32_t const irqState = save_and_disable_interrupts();
+    lastArmUs = time_us_32();
+    armedDataUs = dataUs;
+    armed = true;
+    restore_interrupts(irqState);
+}
+
+void __not_in_flash_func(USBReportScheduler::onXferCompleteIsr)() {
+    uint8_t const epNum = tu_edpt_number(endpoint);
+    if (!armed || epNum == 0 || epNum >= USB_NUM_ENDPOINTS) return;
+    // Our IN buffer is consumed once the controller cleared AVAIL; other
+    // endpoints' completions leave it set.
+    if (usb_dpram->ep_buf_ctrl[epNum].in & USB_BUF_CTRL_AVAIL) return;
+    uint32_t const now = time_us_32();
+    armed = false;
+    diag.reads++;
+    uint32_t const phase = now - lastSofUs;
+    if (phase < USB_FULL_SPEED_FRAME_US && sofTimingReady) {
+        lastReadSofEpoch = sofEpoch;
+        lastReadValid = true;
+        noteReadPhase(phase);
+        diag.phaseSumUs += phase;
+        if (phase < diag.phaseMinUs) diag.phaseMinUs = phase;
+        if (phase > diag.phaseMaxUs) diag.phaseMaxUs = phase;
+    }
+    uint32_t const armAge = now - lastArmUs;
+    diag.armAgeSumUs += armAge;
+    if (armAge > diag.armAgeMaxUs) diag.armAgeMaxUs = armAge;
+    if (armedDataUs != 0) {
+        uint32_t const dataAge = now - armedDataUs;
+        diag.dataReads++;
+        diag.dataAgeSumUs += dataAge;
+        if (dataAge > diag.dataAgeMaxUs) diag.dataAgeMaxUs = dataAge;
+    }
+}
+
+void __not_in_flash_func(USBReportScheduler::noteReadPhase)(uint32_t phaseUs) {
+    if (!readPhaseReady) {
+        if (learnCount == 0) {
+            learnLoUs = learnHiUs = phaseUs;
+        } else {
+            if (phaseUs < learnLoUs) learnLoUs = phaseUs;
+            if (phaseUs > learnHiUs) learnHiUs = phaseUs;
+        }
+        if (learnHiUs - learnLoUs > READ_PHASE_MAX_SPREAD_US) {
+            learnCount = 0;   // unstable host timing: keep the SOF deadline
+            return;
+        }
+        if (++learnCount >= READ_PHASE_LEARN_READS) {
+            readPhaseLoUs = learnLoUs;
+            readPhaseReady = true;
+            windowLoUs = 0xFFFFFFFF;
+            windowCount = 0;
+        }
+        return;
+    }
+    if (phaseUs + READ_PHASE_EARLY_US < readPhaseLoUs) {
+        // Host now polls earlier than predicted: fall back and re-learn
+        readPhaseReady = false;
+        learnCount = 0;
+        return;
+    }
+    if (phaseUs < readPhaseLoUs) readPhaseLoUs = phaseUs;
+    if (phaseUs < windowLoUs) windowLoUs = phaseUs;
+    if (++windowCount >= READ_PHASE_WINDOW_READS) {
+        readPhaseLoUs = windowLoUs;   // follow a host that moved later
+        windowLoUs = 0xFFFFFFFF;
+        windowCount = 0;
+    }
+}
+
+// Weak TinyUSB hook, called in the ISR whenever an event is queued
+extern "C" void __not_in_flash_func(tud_event_hook_cb)(uint8_t rhport, uint32_t eventid, bool in_isr) {
+    (void)rhport;
+    if (in_isr && eventid == DCD_EVENT_XFER_COMPLETE) {
+        USBReportScheduler::getInstance().onXferCompleteIsr();
+    }
+}
+
+USBReportSchedulerDiag USBReportScheduler::takeDiag() {
+    uint32_t const irqState = save_and_disable_interrupts();
+    USBReportSchedulerDiag d = diag;
+    diag = {};
+    restore_interrupts(irqState);
+    return d;
 }
 
 void USBReportScheduler::configure(uint8_t endpoint, bool stageReports) {
@@ -61,6 +159,10 @@ void USBReportScheduler::reset() {
     lastSofUs = 0;
     sofEpoch = 0;
     sofTimingReady = false;
+    lastReadValid = false;
+    readPhaseReady = false;
+    learnCount = 0;
+    armed = false;
     inputTimingResetPending = false;
     reportPendingAtSof = false;
     lastSofFrame = 0;
@@ -133,11 +235,13 @@ void __not_in_flash_func(USBReportScheduler::onSof)(uint8_t rhport, uint32_t fra
          now - scheduler.lastSofUs >= 2 * USB_FULL_SPEED_FRAME_US)) {
         scheduler.resetPollTiming();
         scheduler.inputTimingResetPending = true;
+        scheduler.lastReadValid = false;
     }
     scheduler.lastSofFrame = frameCount;
     scheduler.reportPendingAtSof = epNum != 0 && epNum < USB_NUM_ENDPOINTS &&
         (usb_dpram->ep_buf_ctrl[epNum].in & (USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_FULL)) ==
             (USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_FULL);
+    scheduler.diag.frames++;
     scheduler.lastSofUs = now;
     ++scheduler.sofEpoch;
     scheduler.sofTimingReady = true;
@@ -239,6 +343,9 @@ bool __not_in_flash_func(USBReportScheduler::hasSchedulingWindow)() const {
     bool const pollReady = pollTimingReady;
     uint32_t const framesSincePoll = sofEpoch - lastPollSofEpoch;
     uint32_t const pollFrames = pollIntervalFrames;
+    bool const phaseReady = readPhaseReady && lastReadValid;
+    uint32_t const framesSinceRead = sofEpoch - lastReadSofEpoch;
+    uint32_t const readPhaseUs = readPhaseLoUs;
     restore_interrupts(irqState);
 
     if (!timingReady) {
@@ -251,7 +358,20 @@ bool __not_in_flash_func(USBReportScheduler::hasSchedulingWindow)() const {
     }
 
     uint64_t remainingUs = USB_FULL_SPEED_FRAME_US - phaseUs;
-    if (!pendingOwned && pollReady) {
+    if (!pendingOwned && phaseReady) {
+        // Deadline = predicted host read (learned in-frame phase) of the
+        // frame the next poll falls in, minus a guard.
+        uint32_t const interval = pollReady ? pollFrames : 1;
+        if (framesSinceRead > interval) {
+            return false; // expected read not seen: never wait another period
+        }
+        uint32_t const framesAhead = interval - framesSinceRead; // 0 = this frame
+        uint32_t const target = readPhaseUs > READ_PHASE_GUARD_US ? readPhaseUs - READ_PHASE_GUARD_US : 0;
+        if (framesAhead == 0 && phaseUs >= target) {
+            return false;
+        }
+        remainingUs = uint64_t{framesAhead} * USB_FULL_SPEED_FRAME_US + target - phaseUs;
+    } else if (!pendingOwned && pollReady) {
         if (framesSincePoll >= pollFrames) {
             return false; // The prediction expired; never wait another period.
         }
@@ -315,6 +435,7 @@ bool __not_in_flash_func(USBReportScheduler::sendDirectReport)(
     }
 
     if (allowAnalogScheduling && !reportRequired && shouldDefer(priority)) {
+        diag.deferred++;
         return false;
     }
 
@@ -407,6 +528,7 @@ bool __not_in_flash_func(USBReportScheduler::flushStagedReport)() {
 void __not_in_flash_func(USBReportScheduler::noteQueued)(
         USBReportPriority const &priority, uint32_t queuedSofEpoch,
         bool replaceable) {
+    noteArmed();
     pendingPriority = priority;
     pendingPriorityUnchanged = priority == deliveredPriority;
     pendingOwned = true;
@@ -512,6 +634,10 @@ bool __no_inline_not_in_flash_func(USBReportScheduler::replacePendingInBuffer)(
         *bufferControl = savedControl & ~USB_BUF_CTRL_AVAIL;
         busy_wait_at_least_cycles(12);
         *bufferControl = savedControl;
+        lastArmUs = time_us_32();
+        armedDataUs = dataUs;
+        armed = true;
+        diag.replaced++;
     }
 
     hw_clear_bits(&usb_hw->abort_done, abortMask);

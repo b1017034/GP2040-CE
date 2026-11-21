@@ -1,4 +1,5 @@
 #include "addons/hml_analog.h"
+#include "drivers/shared/USBReportScheduler.h"
 #include "storagemanager.h"
 #include "peripheralmanager.h"
 #include "hardware/adc.h"
@@ -589,6 +590,7 @@ void __not_in_flash_func(HMLAnalogAddon::acquire)() {
     // otherwise the zeroed buffer reads as full deflection after boot
     rawValid = ads->scanCompleted;
     acquireEndUs = time_us_32();
+    USBReportScheduler::getInstance().setDataTimestamp(acquireEndUs);
     uint32_t took = acquireEndUs - t0;
     timing.acquireUs = (uint16_t)(took > 0xFFFF ? 0xFFFF : took);
 }
@@ -671,6 +673,19 @@ void __not_in_flash_func(HMLAnalogAddon::updateTiming)(uint32_t nowUs) {
         timing.loopMaxUs = loopMaxWindowUs;
         loopMaxWindowUs = 0;
         timingWindowUs = nowUs;
+        USBReportSchedulerDiag d = USBReportScheduler::getInstance().takeDiag();
+        auto clamp16 = [](uint32_t v) -> uint16_t { return (uint16_t)(v > 0xFFFF ? 0xFFFF : v); };
+        timing.usbFrames = clamp16(d.frames);
+        timing.usbReads = clamp16(d.reads);
+        timing.usbPhaseAvgUs = clamp16(d.reads ? d.phaseSumUs / d.reads : 0);
+        timing.usbPhaseMinUs = clamp16(d.reads ? d.phaseMinUs : 0);
+        timing.usbPhaseMaxUs = clamp16(d.phaseMaxUs);
+        timing.usbArmAgeAvgUs = clamp16(d.reads ? d.armAgeSumUs / d.reads : 0);
+        timing.usbArmAgeMaxUs = clamp16(d.armAgeMaxUs);
+        timing.usbDataAgeAvgUs = clamp16(d.dataReads ? d.dataAgeSumUs / d.dataReads : 0);
+        timing.usbDataAgeMaxUs = clamp16(d.dataAgeMaxUs);
+        timing.usbReplaced = clamp16(d.replaced);
+        timing.usbDeferred = clamp16(d.deferred);
     }
     uint32_t age = nowUs - acquireEndUs;
     timing.ageUs = (uint16_t)(age > 0xFFFF ? 0xFFFF : age);

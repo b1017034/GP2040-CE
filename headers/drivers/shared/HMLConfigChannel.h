@@ -17,6 +17,7 @@
 //               [1]=0x01 RAW    (live raw ADC + processed stick output)
 //               [1]=0x02 PARAM: [2]=target [3]=paramId [4]=index
 //               [1]=0x03 DUMP:  [2]=target [3]=page (9 params per page)
+//               [1]=0x04 USBSTATS (report timing diagnostics)
 //   Feature report 0x61 (device -> host, 63 bytes): response, [0] echoes the
 //   selected page type (0xFF if the selection was invalid).
 //
@@ -47,6 +48,9 @@ constexpr uint8_t REPORT_GET = 0x61;
 //     sample age at stick processing, all u16 microseconds;
 //     [48..51] ADC outlier frames, [52..55] published-value spikes (u32),
 //     [56] median window size
+//   SELECT page 0x04 USBSTATS (last 1s window, u16 each from [1]): frames,
+//     reads, read phase avg/min/max us, arm->read avg/max us, ADC data->read
+//     avg/max us, replacements, deferrals, loop avg/max us, ADC acquire us
 constexpr uint8_t PROTOCOL_VERSION = 4;
 
 // Handle a SET_REPORT (feature) with report id REPORT_SET
