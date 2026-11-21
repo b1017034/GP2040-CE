@@ -8,8 +8,10 @@
 // stock firmware marks ASSIGNED_TO_ADDON with no other known function.
 // (20/24/25 removed: they are the lightbar / L3 / R3 pins on the HML board and
 // probing them corrupts those peripherals if the ADC link is slow to come up.)
+#if ADS8332_PROBE_FALLBACKS
 static const int8_t CS_CANDIDATES[] = { 1, 4, 5, 6, 7, 10, 11 };
 #define CS_CANDIDATE_COUNT (sizeof(CS_CANDIDATES) / sizeof(CS_CANDIDATES[0]))
+#endif
 
 void ADS8332::setFormat(uint8_t mode) {
     spi->beginTransaction(ADS8332_SPI_SPEED_HZ, spi_order_t::SPI_MSB_FIRST,
@@ -156,8 +158,13 @@ void ADS8332::init() {
         }
     }
 
+#if ADS8332_PROBE_FALLBACKS
     // Strategy B: hardware CS, manual channel select (fallback if the software
     // CS timing above cannot establish the link).
+    // Disabled by default: this part ignores manual channel select, so B
+    // "succeeds" (CFR readback is fine) but every channel returns the same
+    // conversion. A transient strategy-A failure after a warm reboot then
+    // pinned the link in that state with no health check to recover.
     if (cfgCs >= 0) {
         gpio_set_function(cfgCs, GPIO_FUNC_SPI);
         hwCs = true;
@@ -173,7 +180,9 @@ void ADS8332::init() {
         gpio_set_function(cfgCs, GPIO_FUNC_NULL);
     }
 
-    // Strategy C: software CS on other candidate pins.
+    // Strategy C: software CS on other candidate pins (bring-up exploration;
+    // drives GPIO6/7 = the PS5 dongle USB host pins on HML, and leaves csPin
+    // on the last candidate when it fails).
     hwCs = false;
     for (uint8_t p = 0; p < CS_CANDIDATE_COUNT; p++) {
         int8_t pin = CS_CANDIDATES[p];
@@ -195,6 +204,11 @@ void ADS8332::init() {
         gpio_set_dir(pin, GPIO_IN);
         gpio_deinit(pin);
     }
+    csPin = cfgCs;
+#endif
+    // Strategy A failed: stay down; the addon retries init() periodically
+    // (a warm reboot can leave the chip desynced for a moment).
+    hwCs = false;
     linkOk = false;
 }
 

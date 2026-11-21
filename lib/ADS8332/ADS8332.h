@@ -38,6 +38,12 @@
 // Link health window: within this many frames every channel must have been
 // seen at least ADS8332_HEALTH_MIN_SAMPLES times, else the window counts as
 // unhealthy; 3 unhealthy windows in a row drop the link for a re-probe.
+// Probe strategies B (hardware CS + manual select) and C (other CS pins)
+// are bring-up tools only; see ADS8332::init().
+#ifndef ADS8332_PROBE_FALLBACKS
+#define ADS8332_PROBE_FALLBACKS 0
+#endif
+
 // Glitch diagnostics: a frame further than this from its channel's current
 // median is counted as an outlier; a published value that moves further
 // than this in one step is counted as a spike (a real stick cannot travel
