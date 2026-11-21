@@ -1089,6 +1089,16 @@ message HMLStickOptions
     repeated int32 angleMapOut100 = 43 [(nanopb).max_count = 16];
     repeated uint32 angleMapDz100 = 44 [(nanopb).max_count = 16];
     optional uint32 angleMapEnable = 45;
+    // FireBird A*-style custom curves: 4 slots selected by curvePreset 5..8,
+    // coordinates in tenths of a percent (0..1000 = 0.0..100.0). Point i of
+    // slot s lives at index s*10+i. Replaces curveX/curveY (kept for config
+    // migration: slot 0 is seeded from them once).
+    repeated uint32 curvesX = 46 [packed = true, (nanopb).max_count = 40];
+    repeated uint32 curvesY = 47 [packed = true, (nanopb).max_count = 40];
+    repeated uint32 curvesCount = 48 [packed = true, (nanopb).max_count = 4];
+    // Stick oversampling: moving average of 2^n ADC readings per axis before
+    // the pipeline (0 = off, 1..4 = 2/4/8/16 samples)
+    optional uint32 oversampling = 49;
 }
 
 message HMLAnalogOptions

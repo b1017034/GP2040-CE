@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "config_utils.h"
 
 #include "config.pb.h"
@@ -1606,6 +1607,38 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
         INIT_UNSET_PROPERTY((*stick), angleSnap, 0);
         INIT_UNSET_PROPERTY((*stick), angleMapCount, 0);
         INIT_UNSET_PROPERTY((*stick), angleMapEnable, 0);
+        INIT_UNSET_PROPERTY((*stick), oversampling, 0);
+        // 4-slot tenths curves: seed once. Slot 0 takes the legacy custom
+        // curve (percent -> tenths), the others start linear.
+        if (stick->curvesCount_count == 0) {
+            static const uint32_t LINEAR[3][2] = {{300, 300}, {700, 700}, {1000, 1000}};
+            for (uint32_t slot = 0; slot < 4; slot++) {
+                uint32_t n = 3;
+                if (slot == 0 && stick->curveX_count > 0 && stick->curveY_count > 0) {
+                    n = stick->curvePointCount;
+                    if (n == 0 || n > stick->curveX_count) n = stick->curveX_count;
+                    if (n > stick->curveY_count) n = stick->curveY_count;
+                    if (n > 10) n = 10;
+                    for (uint32_t i = 0; i < n; i++) {
+                        stick->curvesX[i] = std::min<uint32_t>(stick->curveX[i], 100) * 10;
+                        stick->curvesY[i] = std::min<uint32_t>(stick->curveY[i], 100) * 10;
+                    }
+                } else {
+                    for (uint32_t i = 0; i < 3; i++) {
+                        stick->curvesX[slot * 10 + i] = LINEAR[i][0];
+                        stick->curvesY[slot * 10 + i] = LINEAR[i][1];
+                    }
+                }
+                for (uint32_t i = n; i < 10; i++) {
+                    stick->curvesX[slot * 10 + i] = 0;
+                    stick->curvesY[slot * 10 + i] = 0;
+                }
+                stick->curvesCount[slot] = n;
+            }
+            stick->curvesX_count = 40;
+            stick->curvesY_count = 40;
+            stick->curvesCount_count = 4;
+        }
     }
     config.addonOptions.hmlAnalogOptions.has_leftStick = true;
     config.addonOptions.hmlAnalogOptions.has_rightStick = true;

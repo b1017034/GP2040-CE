@@ -14,6 +14,8 @@ uint16_t HMLAnalogAddon::rawAdc[2] = {0};
 bool HMLAnalogAddon::rawValid = false;
 HMLAnalogAddon* HMLAnalogAddon::instance = nullptr;
 HMLTimingStats HMLAnalogAddon::timing;
+float HMLAnalogAddon::preCurveX[2] = {0.0f, 0.0f};
+float HMLAnalogAddon::preCurveY[2] = {0.0f, 0.0f};
 
 // Sensitivity curve presets (fraction in/out), Firebird-compatible
 static const float CURVE_PRESETS[5][3][2] = {
@@ -143,13 +145,19 @@ static float __not_in_flash_func(calibrate)(uint16_t raw, uint32_t mn, uint32_t 
 }
 
 // Piecewise-linear sensitivity curve on stick magnitude (0..1 in, 0..1 out)
+// Presets 0..4 are built in; 5..8 select custom slots 0..3, whose points are
+// stored in tenths of a percent (FireBird A* 0.0..100.0 resolution).
 static float __not_in_flash_func(applyCurve)(float mag, const HMLStickOptions& s) {
     const bool custom = s.curvePreset >= 5;
     uint32_t count;
+    uint32_t base = 0;
     if (custom) {
-        count = std::min<uint32_t>(s.curveX_count, (uint32_t)HML_CURVE_MAX_POINTS);
-        if (s.curveY_count < count) count = s.curveY_count;
-        if (s.curvePointCount > 0 && s.curvePointCount < count) count = s.curvePointCount;
+        uint32_t slot = std::min<uint32_t>(s.curvePreset - 5, 3);
+        base = slot * HML_CURVE_MAX_POINTS;
+        count = (slot < s.curvesCount_count) ? s.curvesCount[slot] : 0;
+        if (count > HML_CURVE_MAX_POINTS) count = HML_CURVE_MAX_POINTS;
+        if (base + count > s.curvesX_count) count = s.curvesX_count > base ? s.curvesX_count - base : 0;
+        if (base + count > s.curvesY_count) count = s.curvesY_count > base ? s.curvesY_count - base : 0;
         if (count == 0) return mag; // no custom points -> linear
     } else {
         count = 3;
@@ -158,8 +166,8 @@ static float __not_in_flash_func(applyCurve)(float mag, const HMLStickOptions& s
 
     float px = 0.0f, py = 0.0f;
     for (uint32_t i = 0; i < count; i++) {
-        float nx = custom ? (float)s.curveX[i] * 0.01f : preset[i][0];
-        float ny = custom ? (float)s.curveY[i] * 0.01f : preset[i][1];
+        float nx = custom ? (float)s.curvesX[base + i] * 0.001f : preset[i][0];
+        float ny = custom ? (float)s.curvesY[base + i] * 0.001f : preset[i][1];
         if (mag <= nx) {
             float denom = nx - px;
             if (denom <= 0.0001f) return ny;
@@ -403,6 +411,9 @@ void __not_in_flash_func(HMLAnalogAddon::processStick)(const void* stickOptsV, H
     // travel needed for max output)
     fx = axisDeadzone(fx, s.innerX, s.outerX);
     fy = axisDeadzone(fy, s.innerY, s.outerY);
+
+    st.dbgX = fx;
+    st.dbgY = fy;
 
     float mag2 = fx*fx + fy*fy;
     if (mag2 < 1e-8f) {
@@ -652,6 +663,31 @@ void __not_in_flash_func(HMLAnalogAddon::preprocess)() {
 // FireBird 動作の安定化: 静止中 (ノイズ幅以内の変動) は直前の値をホールドし、
 // ノイズ幅を超えて動いたら生値へ完全追従する。追従型 (raw±band を返す) にする
 // と中央・最大値が常に band ぶんズレるので不可。
+// Stick oversampling: moving average over the last 2^n raw readings per axis
+// (each reading is already a 3-sample median from the ADC layer). Adds
+// (2^n - 1)/2 readings of lag (~0.17ms each at the current loop rate).
+static void __not_in_flash_func(oversample)(HMLStickState& st, uint32_t setting, uint16_t& x, uint16_t& y) {
+    uint8_t shift = (uint8_t)(setting > 4 ? 4 : setting);
+    if (shift == 0) { st.osShift = 0; st.osFill = 0; return; }
+    if (shift != st.osShift) { // window changed: restart
+        st.osShift = shift; st.osFill = 0; st.osHead = 0; st.osSumX = 0; st.osSumY = 0;
+    }
+    const uint8_t n = (uint8_t)(1u << shift);
+    if (st.osFill == n) {
+        st.osSumX -= st.osX[st.osHead];
+        st.osSumY -= st.osY[st.osHead];
+    } else {
+        st.osFill++;
+    }
+    st.osX[st.osHead] = x;
+    st.osY[st.osHead] = y;
+    st.osSumX += x;
+    st.osSumY += y;
+    st.osHead = (uint8_t)((st.osHead + 1) & (n - 1));
+    x = (uint16_t)((st.osSumX + st.osFill / 2) / st.osFill);
+    y = (uint16_t)((st.osSumY + st.osFill / 2) / st.osFill);
+}
+
 static uint16_t __not_in_flash_func(gateAxis)(uint16_t raw, uint16_t& held, uint32_t band) {
     if (band == 0) { held = raw; return raw; }
     // 静止時ジッターの抑制が目的なのでバンドはフルスケール5%まで: 計測異常で
@@ -715,6 +751,7 @@ void __not_in_flash_func(HMLAnalogAddon::process)() {
     if (opts.chLX >= 0 && opts.chLY >= 0) {
         const HMLStickOptions& s = opts.leftStick;
         uint16_t rx16 = rawChannels[opts.chLX], ry16 = rawChannels[opts.chLY];
+        oversample(leftState, s.oversampling, rx16, ry16);
         if (s.noiseSuppress) {
             if (!leftState.heldInit) { leftState.heldX = rx16; leftState.heldY = ry16; leftState.heldInit = true; }
             rx16 = gateAxis(rx16, leftState.heldX, s.noiseX);
@@ -725,12 +762,14 @@ void __not_in_flash_func(HMLAnalogAddon::process)() {
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
         processStick(&s, leftState, rawX, rawY, lx, ly);
+        preCurveX[0] = leftState.dbgX; preCurveY[0] = leftState.dbgY;
         gamepad->state.lx = toAxis16(lx);
         gamepad->state.ly = toAxis16(ly);
     }
     if (opts.chRX >= 0 && opts.chRY >= 0) {
         const HMLStickOptions& s = opts.rightStick;
         uint16_t rx16 = rawChannels[opts.chRX], ry16 = rawChannels[opts.chRY];
+        oversample(rightState, s.oversampling, rx16, ry16);
         if (s.noiseSuppress) {
             if (!rightState.heldInit) { rightState.heldX = rx16; rightState.heldY = ry16; rightState.heldInit = true; }
             rx16 = gateAxis(rx16, rightState.heldX, s.noiseX);
@@ -739,6 +778,7 @@ void __not_in_flash_func(HMLAnalogAddon::process)() {
         float rawX = -calibrate(rx16, s.calMinX, s.calCenterX, s.calMaxX);
         float rawY = calibrate(ry16, s.calMinY, s.calCenterY, s.calMaxY);
         processStick(&s, rightState, rawX, rawY, rx, ry);
+        preCurveX[1] = rightState.dbgX; preCurveY[1] = rightState.dbgY;
         gamepad->state.rx = toAxis16(rx);
         gamepad->state.ry = toAxis16(ry);
     }

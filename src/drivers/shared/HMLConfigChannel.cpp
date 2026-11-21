@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "drivers/shared/HMLConfigChannel.h"
 
 #include <string.h>
@@ -74,6 +75,10 @@ static const ParamDef stickParams[] = {
     P_ARRAY (HMLStickOptions, 43, angleMapOut100, PK_I32, 16),
     P_ARRAY (HMLStickOptions, 44, angleMapDz100, PK_U32, 16),
     P_SCALAR(HMLStickOptions, 45, angleMapEnable, PK_U32),
+    P_ARRAY (HMLStickOptions, 46, curvesX, PK_U32, 40),
+    P_ARRAY (HMLStickOptions, 47, curvesY, PK_U32, 40),
+    P_ARRAY (HMLStickOptions, 48, curvesCount, PK_U32, 4),
+    P_SCALAR(HMLStickOptions, 49, oversampling, PK_U32),
 };
 
 static const ParamDef globalParams[] = {
@@ -324,6 +329,7 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
         buffer[7] = (uint8_t)(sizeof(globalParams) / sizeof(globalParams[0]));
         buffer[8] = DUMP_PER_PAGE;
         buffer[9] = (uint8_t)Storage::getInstance().getGamepadOptions().inputMode;
+        buffer[10] = HML_BOARD_PAD;
         break;
     }
     case 0x01: { // RAW: live ADC channels + processed stick output
@@ -366,8 +372,19 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
         }
         break;
     }
-    case 0x04: { // USBSTATS: report scheduler timing, last 1s window (u16 us / counts)
-        buffer[0] = 0x04;
+    case 0x06: { // STICKVEC: pre-curve stick vectors (angle calibration)
+        buffer[0] = 0x06;
+        buffer[1] = HMLAnalogAddon::rawValid ? 1 : 0;
+        for (int i = 0; i < 2; i++) {
+            float x = std::clamp(HMLAnalogAddon::preCurveX[i], -1.0f, 1.0f);
+            float y = std::clamp(HMLAnalogAddon::preCurveY[i], -1.0f, 1.0f);
+            put16(buffer + 2 + i * 4, (uint16_t)(int16_t)(x * 32767.0f));
+            put16(buffer + 4 + i * 4, (uint16_t)(int16_t)(y * 32767.0f));
+        }
+        break;
+    }
+    case 0x05: { // USBSTATS: report scheduler timing, last 1s window (u16 us / counts)
+        buffer[0] = 0x05;
         const HMLTimingStats &t = HMLAnalogAddon::timing;
         const uint16_t v[] = { t.usbFrames, t.usbReads, t.usbPhaseAvgUs, t.usbPhaseMinUs, t.usbPhaseMaxUs,
                                t.usbArmAgeAvgUs, t.usbArmAgeMaxUs, t.usbDataAgeAvgUs, t.usbDataAgeMaxUs,

@@ -17,7 +17,8 @@
 //               [1]=0x01 RAW    (live raw ADC + processed stick output)
 //               [1]=0x02 PARAM: [2]=target [3]=paramId [4]=index
 //               [1]=0x03 DUMP:  [2]=target [3]=page (9 params per page)
-//               [1]=0x04 USBSTATS (report timing diagnostics)
+//               [1]=0x05 USBSTATS (report timing diagnostics)
+//               [1]=0x06 STICKVEC (pre-curve stick vectors)
 //   Feature report 0x61 (device -> host, 63 bytes): response, [0] echoes the
 //   selected page type (0xFF if the selection was invalid).
 //
@@ -44,14 +45,28 @@ constexpr uint8_t REPORT_SET = 0x60;
 constexpr uint8_t REPORT_GET = 0x61;
 // v2: REBOOT / SET_INPUT_MODE commands, INFO carries current input mode
 // v3: comboModeB1-B4 global params (Share+Options+face-button mode switch)
-// v4: RAW page [40..47] = loop avg / loop max (last 1s) / ADC acquire time /
-//     sample age at stick processing, all u16 microseconds;
+// v4 (shared with the converter firmware): INFO [10] = board kind, SELECT
+//     page 0x04 HOST and commands 0x06-0x08 (gate calibration) belong to the
+//     converter; a pad answers HOST as invalid and ignores those commands
+// v5 (pad): RAW page [40..47] = loop avg / loop max (last 1s) / ADC acquire
+//     time / sample age at stick processing, all u16 microseconds;
 //     [48..51] ADC outlier frames, [52..55] published-value spikes (u32),
 //     [56] median window size
-//   SELECT page 0x04 USBSTATS (last 1s window, u16 each from [1]): frames,
+//   SELECT page 0x05 USBSTATS (last 1s window, u16 each from [1]): frames,
 //     reads, read phase avg/min/max us, arm->read avg/max us, ADC data->read
 //     avg/max us, replacements, deferrals, loop avg/max us, ADC acquire us
-constexpr uint8_t PROTOCOL_VERSION = 4;
+//   SELECT page 0x06 STICKVEC: [1]=valid, then per stick (left, right) two
+//     int16 = the pre-curve stick vector x,y scaled by 32767 (what the angle
+//     map sees; used by the 8-direction angle calibration)
+//   stick params 46-48 curvesX/curvesY/curvesCount (4 custom curve slots,
+//     tenths of a percent, index = slot*10+point), 49 oversampling
+constexpr uint8_t PROTOCOL_VERSION = 5;
+
+// What kind of board the tool is talking to (INFO [10], v4+)
+enum HMLBoardKind : uint8_t {
+    HML_BOARD_PAD = 0,        // sticks come from the on-board ADS8332
+    HML_BOARD_CONVERTER = 1,  // sticks come from a controller on the USB host
+};
 
 // Handle a SET_REPORT (feature) with report id REPORT_SET
 void handleSet(const uint8_t *buffer, uint16_t bufsize);

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "config.pb.h"
 #include "base64.h"
 #include "hardware/adc.h"
@@ -3285,10 +3286,13 @@ static void hmlStickToJson(JsonObject o, const HMLStickOptions& s)
     o["outerDeadzone"] = s.outerDeadzone;
     o["curvePreset"] = s.curvePreset;
     o["curvePointCount"] = s.curvePointCount;
+    // The web UI edits one custom curve in whole percent: show slot 0 of the
+    // 4-slot tenths curves (the config tool edits all four)
     JsonArray cx = o.createNestedArray("curveX");
     JsonArray cy = o.createNestedArray("curveY");
-    for (unsigned i = 0; i < s.curveX_count; i++) cx.add(s.curveX[i]);
-    for (unsigned i = 0; i < s.curveY_count; i++) cy.add(s.curveY[i]);
+    for (unsigned i = 0; i < 10 && i < s.curvesX_count; i++) cx.add((s.curvesX[i] + 5) / 10);
+    for (unsigned i = 0; i < 10 && i < s.curvesY_count; i++) cy.add((s.curvesY[i] + 5) / 10);
+    if (s.curvesCount_count > 0) o["curvePointCount"] = s.curvesCount[0];
     o["rcFilterStrength"] = s.rcFilterStrength;
     o["rcSnapback"] = s.rcSnapback;
     o["rcAdvanced"] = s.rcAdvanced;
@@ -3338,6 +3342,15 @@ static void hmlStickFromJson(JsonVariant o, HMLStickOptions& s)
     s.curveX_count = 0; s.curveY_count = 0;
     for (unsigned i = 0; i < cx.size() && i < 10; i++) { s.curveX[i] = cx[i]; s.curveX_count++; }
     for (unsigned i = 0; i < cy.size() && i < 10; i++) { s.curveY[i] = cy[i]; s.curveY_count++; }
+    // Mirror the web UI's curve into slot 0 of the tenths curves
+    if (s.curvesX_count < 10) s.curvesX_count = 10;
+    if (s.curvesY_count < 10) s.curvesY_count = 10;
+    if (s.curvesCount_count < 1) s.curvesCount_count = 1;
+    for (unsigned i = 0; i < 10; i++) {
+        s.curvesX[i] = i < s.curveX_count ? std::min<uint32_t>(s.curveX[i], 100) * 10 : 0;
+        s.curvesY[i] = i < s.curveY_count ? std::min<uint32_t>(s.curveY[i], 100) * 10 : 0;
+    }
+    s.curvesCount[0] = std::min<uint32_t>(s.curvePointCount ? s.curvePointCount : s.curveX_count, 10);
     s.rcFilterStrength = o["rcFilterStrength"];
     s.rcSnapback = o["rcSnapback"];
     s.rcAdvanced = o["rcAdvanced"];

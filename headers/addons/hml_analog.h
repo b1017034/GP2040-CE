@@ -67,6 +67,18 @@ struct HMLStickState {
     uint8_t dlyHead = 0;
     uint8_t dlyCount = 0;
     uint32_t dlyLastStoreUs = 0;
+    // Oversampling: moving-average rings of raw counts (up to 16 per axis)
+    uint16_t osX[16] = {0};
+    uint16_t osY[16] = {0};
+    uint32_t osSumX = 0;
+    uint32_t osSumY = 0;
+    uint8_t osHead = 0;
+    uint8_t osFill = 0;
+    uint8_t osShift = 0;     // active window = 1 << osShift
+    // Diagnostics for the 8-direction angle calibration: the stick vector
+    // right before the sensitivity curve / angle correction (-1..1)
+    float dbgX = 0.0f;
+    float dbgY = 0.0f;
 };
 
 // Pipeline timing (us), exposed over the config channel RAW page.
@@ -120,6 +132,9 @@ public:
     static void lightbarTick();
     static HMLAnalogAddon* instance;
     static HMLTimingStats timing;
+    // Pre-curve stick vectors for the config channel (0 = left, 1 = right)
+    static float preCurveX[2];
+    static float preCurveY[2];
     ADS8332* getAds() { return ads; }
 
 private:
