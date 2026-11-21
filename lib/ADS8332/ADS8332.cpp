@@ -267,8 +267,16 @@ void __not_in_flash_func(ADS8332::readAll)(uint16_t values[ADS8332_CHANNEL_COUNT
             if (histCount[tag] < ADS8332_MEDIAN_WINDOW) histCount[tag]++;
             // Only publish once the window is full, so a single early
             // mispair can never reach the output
-            if (histCount[tag] == ADS8332_MEDIAN_WINDOW)
-                values[tag] = windowMedian(hist[tag], ADS8332_MEDIAN_WINDOW);
+            if (histCount[tag] == ADS8332_MEDIAN_WINDOW) {
+                uint16_t med = windowMedian(hist[tag], ADS8332_MEDIAN_WINDOW);
+                int32_t dev = (int32_t)value - (int32_t)med;
+                if (dev > ADS8332_GLITCH_COUNTS || dev < -ADS8332_GLITCH_COUNTS) outlierFrames++;
+                if (scanCompleted) {
+                    int32_t step = (int32_t)med - (int32_t)values[tag];
+                    if (step > ADS8332_GLITCH_COUNTS || step < -ADS8332_GLITCH_COUNTS) spikes++;
+                }
+                values[tag] = med;
+            }
             if (healthSeen[tag] < 255) healthSeen[tag]++;
         }
         busy_wait_us(4); // let the sequencer advance

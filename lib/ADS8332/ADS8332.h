@@ -38,6 +38,11 @@
 // Link health window: within this many frames every channel must have been
 // seen at least ADS8332_HEALTH_MIN_SAMPLES times, else the window counts as
 // unhealthy; 3 unhealthy windows in a row drop the link for a re-probe.
+// Glitch diagnostics: a frame further than this from its channel's current
+// median is counted as an outlier; a published value that moves further
+// than this in one step is counted as a spike (a real stick cannot travel
+// 4096 counts within one ~185us sweep).
+#define ADS8332_GLITCH_COUNTS 4096
 #define ADS8332_HEALTH_WINDOW 48
 #define ADS8332_HEALTH_MIN_SAMPLES 3
 
@@ -83,6 +88,9 @@ public:
     uint8_t foundModes[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
     uint8_t foundHw[4] = { 0, 0, 0, 0 };
     uint8_t foundCount = 0;
+    // Glitch counters (see ADS8332_GLITCH_COUNTS), monotonically increasing
+    uint32_t outlierFrames = 0;
+    uint32_t spikes = 0;
 
 private:
     void setFormat(uint8_t mode);

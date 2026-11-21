@@ -32,6 +32,12 @@ struct HMLRcCache {
     bool valid = false;
 };
 
+// Recent raw history for 1ms-window derivatives (lead term, RC velocity).
+// FireBird defines them per 1kHz sample; taking the per-loop delta instead
+// amplifies per-sample noise at faster loop rates.
+#define HML_RAW_HIST 16
+#define HML_DERIV_WINDOW_US 1000
+
 // Runtime state for one stick axis pair
 struct HMLStickState {
     // filtered values (normalized -1..1)
@@ -39,6 +45,12 @@ struct HMLStickState {
     float filtY = 0.0f;
     float prevRawX = 0.0f;
     float prevRawY = 0.0f;
+    // raw history ring (newest at rawHead-1)
+    float rawHistX[HML_RAW_HIST] = {0};
+    float rawHistY[HML_RAW_HIST] = {0};
+    uint32_t rawHistT[HML_RAW_HIST] = {0};
+    uint8_t rawHead = 0;
+    uint8_t rawCount = 0;
     // snapback filter state (return-phase low-pass)
     float snapX = 0.0f;
     float snapY = 0.0f;

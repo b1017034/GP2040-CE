@@ -37,13 +37,16 @@
 
 // ---- HML Analog addon: ADS8332 sticks + analog PS button + ADC triggers ----
 #define HML_ANALOG_ENABLED 1
-// ADS8332 channel assignment (adjustable live in webconfig)
-#define HML_ANALOG_CH_LX 0
+// ADS8332 channel assignment (adjustable live in webconfig). Verified on
+// hardware: LX=ch2 LY=ch1 RX=ch6 RY=ch5, PS on ch4 (active-low).
+#define HML_ANALOG_CH_LX 2
 #define HML_ANALOG_CH_LY 1
-#define HML_ANALOG_CH_RX 2
-#define HML_ANALOG_CH_RY 3
+#define HML_ANALOG_CH_RX 6
+#define HML_ANALOG_CH_RY 5
 #define HML_ANALOG_CH_PS 4
-#define HML_ANALOG_PS_THRESHOLD 32768
+// ch4 also carries R3 (~16400 pressed) via a resistor ladder, so the PS
+// threshold must sit below that level (PS pressed reads ~29)
+#define HML_ANALOG_PS_THRESHOLD 8000
 // Analog triggers on RP2040 ADC (from stock firmware analysis)
 #define HML_ANALOG_LT_ADC_PIN 26
 #define HML_ANALOG_RT_ADC_PIN 28

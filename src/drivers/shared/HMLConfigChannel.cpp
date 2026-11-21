@@ -358,6 +358,12 @@ uint16_t handleGet(uint8_t *buffer, uint16_t reqlen) {
         put16(buffer + 42, HMLAnalogAddon::timing.loopMaxUs);
         put16(buffer + 44, HMLAnalogAddon::timing.acquireUs);
         put16(buffer + 46, HMLAnalogAddon::timing.ageUs);
+        if (HMLAnalogAddon::instance != nullptr && HMLAnalogAddon::instance->getAds() != nullptr) {
+            ADS8332 *ads = HMLAnalogAddon::instance->getAds();
+            put32(buffer + 48, (int32_t)ads->outlierFrames);
+            put32(buffer + 52, (int32_t)ads->spikes);
+            buffer[56] = ADS8332_MEDIAN_WINDOW;
+        }
         break;
     }
     case 0x02: { // PARAM: single value

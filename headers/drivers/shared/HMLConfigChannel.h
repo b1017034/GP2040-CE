@@ -44,7 +44,9 @@ constexpr uint8_t REPORT_GET = 0x61;
 // v2: REBOOT / SET_INPUT_MODE commands, INFO carries current input mode
 // v3: comboModeB1-B4 global params (Share+Options+face-button mode switch)
 // v4: RAW page [40..47] = loop avg / loop max (last 1s) / ADC acquire time /
-//     sample age at stick processing, all u16 microseconds
+//     sample age at stick processing, all u16 microseconds;
+//     [48..51] ADC outlier frames, [52..55] published-value spikes (u32),
+//     [56] median window size
 constexpr uint8_t PROTOCOL_VERSION = 4;
 
 // Handle a SET_REPORT (feature) with report id REPORT_SET

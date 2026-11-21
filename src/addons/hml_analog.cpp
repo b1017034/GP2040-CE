@@ -6,6 +6,7 @@
 #include "pico/time.h"
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 uint16_t HMLAnalogAddon::rawChannels[ADS8332_CHANNEL_COUNT] = {0};
 uint16_t HMLAnalogAddon::rawAdc[2] = {0};
@@ -296,14 +297,17 @@ static float __not_in_flash_func(applyAngleMap)(const HMLStickOptions& s, float 
 //         (R=+500 is only ~5ms of lag -- jitter dies in the console's 8-bit
 //         output quantization, response stays crisp)
 // R < 0:  B = -R; base low-pass with alpha@1kHz = 200/(200+B), then a
-//         velocity lead term (B+25)/25 per sample fed back into the state
-static float __not_in_flash_func(rcFilterAxis)(float raw, float prevRaw, float& filt, float strength, float alpha) {
+//         velocity lead term K = (B+25)/25 x (raw delta per 1kHz sample)
+//         fed back into the state. leadDelta is the delta already scaled to
+//         this frame and leadGain the rate-corrected K (see processStick), so
+//         a moving stick gets the same lead at any loop rate while per-sample
+//         ADC noise is not amplified more often.
+static float __not_in_flash_func(rcFilterAxis)(float raw, float leadDelta, float& filt, float strength, float alpha, float leadGain) {
     if (strength > 0.5f) {
         filt += (raw - filt) * alpha;
     } else if (strength < -0.5f) {
-        float b = -strength;
         float smoothed = filt + (raw - filt) * alpha;
-        filt = smoothed + (raw - prevRaw) * (b + 25.0f) * (1.0f / 25.0f);
+        filt = smoothed + leadDelta * leadGain;
         if (filt > 1.25f) filt = 1.25f;
         if (filt < -1.25f) filt = -1.25f;
     } else {
@@ -319,13 +323,30 @@ void __not_in_flash_func(HMLAnalogAddon::processStick)(const void* stickOptsV, H
     if (s.invertX) rawX = -rawX;
     if (s.invertY) rawY = -rawY;
 
+    // 1ms-window derivative reference: the newest stored raw sample that is
+    // at least HML_DERIV_WINDOW_US old (or the oldest one while the history
+    // is still shorter than that). At a 1kHz loop this is exactly the
+    // previous sample, i.e. the FireBird per-sample definition.
+    float refX = rawX, refY = rawY, winMs = 0.0f;
+    if (st.rawCount > 0) {
+        const uint32_t now = frameNowUs;
+        uint8_t pick = (uint8_t)((st.rawHead + HML_RAW_HIST - st.rawCount) % HML_RAW_HIST); // oldest
+        for (uint8_t i = 0; i < st.rawCount; i++) {
+            uint8_t idx = (uint8_t)((st.rawHead + HML_RAW_HIST - 1 - i) % HML_RAW_HIST); // newest first
+            if ((uint32_t)(now - st.rawHistT[idx]) >= HML_DERIV_WINDOW_US) { pick = idx; break; }
+        }
+        refX = st.rawHistX[pick];
+        refY = st.rawHistY[pick];
+        winMs = (float)(now - st.rawHistT[pick]) * 0.001f;
+    }
+    const float winDx = rawX - refX, winDy = rawY - refY;
+
     // RC filter parameters
     float strength = (float)s.rcFilterStrength;
     if (s.rcAdvanced) {
         float velMult = (s.rcVelocityMult100 > 0 ? (float)s.rcVelocityMult100 : 100.0f) * 0.01f;
-        float dx = rawX - st.prevRawX;
-        float dy = rawY - st.prevRawY;
-        float vel = sqrtf(dx*dx + dy*dy) / dtMs;   // normalized units per ms
+        // normalized units per ms over the 1ms window
+        float vel = (winMs > 0.05f) ? sqrtf(winDx*winDx + winDy*winDy) / winMs : 0.0f;
         float vel128 = vel * 64.0f * velMult;
         if (vel128 > 128.0f) vel128 = 128.0f;
         strength = rcStrengthForVelocity(s, vel128);
@@ -334,18 +355,33 @@ void __not_in_flash_func(HMLAnalogAddon::processStick)(const void* stickOptsV, H
     float fx, fy;
     if (strength > 0.5f) {
         float a = rcAlpha(st.rcCache, 100.0f, strength, dtMs);
-        fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, a);
-        fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, a);
+        fx = rcFilterAxis(rawX, 0.0f, st.filtX, strength, a, 0.0f);
+        fy = rcFilterAxis(rawY, 0.0f, st.filtY, strength, a, 0.0f);
     } else if (strength < -0.5f) {
-        float a = rcAlpha(st.rcCache, 200.0f, -strength, dtMs);
-        fx = rcFilterAxis(rawX, st.prevRawX, st.filtX, strength, a);
-        fy = rcFilterAxis(rawY, st.prevRawY, st.filtY, strength, a);
+        const float b = -strength;
+        const float a = rcAlpha(st.rcCache, 200.0f, b, dtMs);
+        // per-1kHz-sample delta, spread over this frame's share of the window
+        const float k = (winMs > 0.05f) ? dtMs / winMs : 0.0f;
+        // Rate-corrected lead gain: the 1kHz filter settles a ramp of slope v
+        // at an offset v*(K-1+a1)/a1; spreading the lead over n frames of
+        // alpha a needs K' = (K-1+a1) * a/(a1*dt) + 1 - a for the same
+        // offset. dt = 1ms gives K' = K exactly.
+        const float K = (b + 25.0f) * (1.0f / 25.0f);
+        const float a1 = 200.0f / (200.0f + b);
+        const float leadGain = (K - 1.0f + a1) * a / (a1 * dtMs) + 1.0f - a;
+        fx = rcFilterAxis(rawX, winDx * k, st.filtX, strength, a, leadGain);
+        fy = rcFilterAxis(rawY, winDy * k, st.filtY, strength, a, leadGain);
     } else {
         fx = st.filtX = rawX;
         fy = st.filtY = rawY;
     }
     st.prevRawX = rawX;
     st.prevRawY = rawY;
+    st.rawHistX[st.rawHead] = rawX;
+    st.rawHistY[st.rawHead] = rawY;
+    st.rawHistT[st.rawHead] = frameNowUs;
+    st.rawHead = (uint8_t)((st.rawHead + 1) % HML_RAW_HIST);
+    if (st.rawCount < HML_RAW_HIST) st.rawCount++;
 
     // Snapback filter: damp only the return-to-center phase (approximation of
     // FireBird's snapback filter; strength 0 = off)
@@ -493,14 +529,35 @@ bool HMLAnalogAddon::noiseSample(uint16_t* mn, uint16_t* mx, int iterations) {
     if (instance == nullptr || instance->ads == nullptr) return false;
     uint16_t ch[ADS8332_CHANNEL_COUNT];
     for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) { mn[i] = 0xFFFF; mx[i] = 0; }
+    // Reference per channel: wait for a full median window, then take the
+    // median of a few published values. Readings further than
+    // ADS8332_GLITCH_COUNTS from it are corrupted frames (seen in web-config,
+    // where the network stack interrupts the SPI bursts), not stick noise -
+    // counting them would store a huge gate band and freeze the stick.
+    for (int it = 0; it < 64 && !instance->ads->scanCompleted; it++) instance->ads->readAll(ch);
+    if (!instance->ads->scanCompleted) return false;
+    uint16_t ref[ADS8332_CHANNEL_COUNT];
+    {
+        uint16_t s[5][ADS8332_CHANNEL_COUNT];
+        for (int k = 0; k < 5; k++) { instance->ads->readAll(ch); memcpy(s[k], ch, sizeof(ch)); }
+        for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) {
+            uint16_t v[5];
+            for (int k = 0; k < 5; k++) v[k] = s[k][i];
+            std::sort(v, v + 5);
+            ref[i] = v[2];
+        }
+    }
     for (int it = 0; it < iterations; it++) {
         instance->ads->readAll(ch);
-        if (!instance->ads->scanCompleted) continue; // window not filled yet
         for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++) {
+            int32_t d = (int32_t)ch[i] - (int32_t)ref[i];
+            if (d > ADS8332_GLITCH_COUNTS || d < -ADS8332_GLITCH_COUNTS) continue;
             if (ch[i] < mn[i]) mn[i] = ch[i];
             if (ch[i] > mx[i]) mx[i] = ch[i];
         }
     }
+    for (int i = 0; i < ADS8332_CHANNEL_COUNT; i++)
+        if (mn[i] > mx[i]) { mn[i] = mx[i] = ref[i]; } // every reading rejected
     return true;
 }
 
